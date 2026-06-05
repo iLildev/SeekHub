@@ -1,8 +1,13 @@
-from telegram import Update
+import asyncio
+import logging
+from telegram import Update, Bot
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
-from db import mirrors as mirrors_db
+from db import sh_mirrors, sh_users
+from utils.fmt import escape
+
+logger = logging.getLogger(__name__)
 
 
 async def cmd_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -10,28 +15,25 @@ async def cmd_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not context.args:
         await update.message.reply_text(
-            "*🔑 Set Mirror Bot Token*\n\n"
-            "Send your bot token to register your mirror:\n\n"
-            "Usage: `/token <your_bot_token>`\n\n"
-            "Get a token from @BotFather by creating a new bot\\.",
+            "*🔑 Register Mirror Bot*\n\n"
+            "Usage: `/token <your\\_bot\\_token>`\n\n"
+            "Get a token from @BotFather\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
 
     token = context.args[0].strip()
-
     if ":" not in token or len(token) < 30:
         await update.message.reply_text(
-            "❌ Invalid token format\\. A valid token looks like:\n`1234567890:ABCdefGHI...`",
+            "❌ Invalid token format\\.\nA valid token looks like: `1234567890:ABCdef\\.\\.\\.`",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
 
+    # Validate the token with Telegram
     try:
-        from telegram import Bot
         bot = Bot(token=token)
         bot_info = await bot.get_me()
-        bot_username = bot_info.username
     except Exception:
         await update.message.reply_text(
             "❌ Could not verify this token\\. Make sure it's correct and try again\\.",
@@ -39,11 +41,24 @@ async def cmd_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    mirrors_db.create_mirror(user.id, token, bot_username)
+    # Register in DB
+    mirror = sh_mirrors.create(
+        owner_id=user.id,
+        bot_token=token,
+        bot_id=bot_info.id,
+        bot_username=bot_info.username,
+    )
 
     await update.message.reply_text(
-        f"✅ Mirror bot registered\\!\n\n"
-        f"🤖 Bot: @{bot_username}\n\n"
-        f"Add your mirror bot to a group or channel to start using it\\.",
+        f"✅ Mirror registered\\!\n\n"
+        f"🤖 Bot: @{escape(bot_info.username)}\n\n"
+        f"Your mirror is now live and connected to the SeekHub database\\.\n"
+        f"Users can search via your mirror and you earn crystals per query\\.",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
+
+    # Signal the runner to start this mirror bot
+    if "mirror_runner" in context.application.bot_data:
+        runner = context.application.bot_data["mirror_runner"]
+        asyncio.create_task(runner.start_mirror(mirror["id"], token))
+        logger.info("Triggered start for new mirror bot @%s", bot_info.username)

@@ -1,13 +1,13 @@
-from db import users, referrals, points
+from db import sh_users, sh_referrals, sh_crystals
 
-
-REFERRAL_REWARD = 50
+REFERRAL_CRYSTALS  = 50   # earned by referrer
+NEW_USER_CRYSTALS  = 10   # bonus for new user
 
 
 def handle_new_user(user_id: int, username: str, first_name: str, referrer_id: int = None):
-    users.upsert_user(user_id, username, first_name)
+    sh_users.upsert(user_id, username, first_name)
 
     if referrer_id and referrer_id != user_id:
-        referrals.add_referral(referrer_id, user_id)
-        points.add_crystals(referrer_id, REFERRAL_REWARD)
-        points.add_crystals(user_id, 10)
+        sh_referrals.add(referrer_id, user_id)
+        sh_crystals.add(referrer_id, REFERRAL_CRYSTALS, "referral")
+        sh_crystals.add(user_id,     NEW_USER_CRYSTALS,  "welcome_bonus")
