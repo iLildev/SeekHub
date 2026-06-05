@@ -287,6 +287,18 @@ CREATE INDEX IF NOT EXISTS idx_mentions_mentioned_user ON tg_mentions(mentioned_
 CREATE INDEX IF NOT EXISTS idx_mentions_in_chat        ON tg_mentions(in_chat_id);
 
 -- ─────────────────────────────────────────────
+--  PHONE INDEX: Phone → Telegram user mapping
+-- ─────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS tg_phone_index (
+    phone       TEXT PRIMARY KEY,               -- normalised E.164 e.g. +79001234567
+    user_id     BIGINT NOT NULL REFERENCES tg_users(id) ON DELETE CASCADE,
+    indexed_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_phone_index_user ON tg_phone_index(user_id);
+
+-- ─────────────────────────────────────────────
 --  SEARCH INDEX: Quick lookup table (denormalized)
 -- ─────────────────────────────────────────────
 

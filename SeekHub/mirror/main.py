@@ -6,15 +6,15 @@ All mirrors share the same handlers — differ only by token + mirror_id.
 """
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
-from mirror.start     import cmd_start
-from mirror.profile   import cmd_profile
-from mirror.search    import cmd_search, cmd_id, cmd_user, cmd_group, cmd_msearch
-from mirror.near      import cmd_near
-from mirror.track     import cmd_track, cmd_untrack, cmd_tracks
-from mirror.analyze   import cmd_analyze, cmd_heatmap, cmd_export
-from mirror.callbacks import handle_callback
-from system.captcha   import handle_captcha_callback
-from system.force_join import handle_check_join_callback
+from mirror.start      import cmd_start
+from mirror.profile    import cmd_profile
+from mirror.search     import cmd_search, cmd_id, cmd_user, cmd_group, cmd_msearch
+from mirror.near       import cmd_near
+from mirror.track      import cmd_track, cmd_untrack, cmd_tracks
+from mirror.analyze    import cmd_analyze, cmd_heatmap, cmd_export
+from mirror.phone      import cmd_phone
+from mirror.link       import cmd_link
+from mirror.callbacks  import handle_callback
 
 
 def build_mirror_app(token: str, mirror_id: int) -> Application:
@@ -29,9 +29,13 @@ def build_mirror_app(token: str, mirror_id: int) -> Application:
     app.add_handler(CommandHandler("group",   cmd_group))
     app.add_handler(CommandHandler("msearch", cmd_msearch))
     app.add_handler(CommandHandler("near",    cmd_near))
+    app.add_handler(CommandHandler("phone",   cmd_phone))
 
-    # ── Profile & tracking ───────────────────────────────────────────────────
+    # ── Profile & referrals ──────────────────────────────────────────────────
     app.add_handler(CommandHandler("profile", cmd_profile))
+    app.add_handler(CommandHandler("link",    cmd_link))
+
+    # ── Tracking ─────────────────────────────────────────────────────────────
     app.add_handler(CommandHandler("track",   cmd_track))
     app.add_handler(CommandHandler("untrack", cmd_untrack))
     app.add_handler(CommandHandler("tracks",  cmd_tracks))
@@ -42,8 +46,6 @@ def build_mirror_app(token: str, mirror_id: int) -> Application:
     app.add_handler(CommandHandler("export",  cmd_export))
 
     # ── Callbacks ────────────────────────────────────────────────────────────
-    app.add_handler(CallbackQueryHandler(handle_captcha_callback,    pattern=r"^captcha_"))
-    app.add_handler(CallbackQueryHandler(handle_check_join_callback, pattern=r"^check_join$"))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
     return app

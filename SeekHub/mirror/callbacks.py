@@ -140,6 +140,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append(f"• {n}{u} — `{r['interactions']}` interactions")
         await query.edit_message_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
 
+    # ── captcha:<answer> ──────────────────────────────────────────────────────
+    elif data.startswith("captcha:"):
+        from mirror.captcha import handle_captcha_callback
+        await handle_captcha_callback(update, context)
+
+    # ── check_join ────────────────────────────────────────────────────────────
+    elif data == "check_join":
+        from mirror.force_join import check_force_join
+        allowed = await check_force_join(update, context)
+        if allowed:
+            await query.answer("✅ Verified! You're all set.", show_alert=True)
+        else:
+            await query.answer("❌ Still not a member.", show_alert=True)
+
     # ── search_more:<query>:<offset> ──────────────────────────────────────────
     elif data.startswith("search_more:"):
         parts  = data.split(":", 2)
