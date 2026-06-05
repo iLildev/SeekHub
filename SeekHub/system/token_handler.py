@@ -4,7 +4,7 @@ from telegram import Update, Bot
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
-from db import sh_mirrors, sh_users
+from db import sh_mirrors, sh_users, tg_users
 from utils.fmt import escape
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,16 @@ async def cmd_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Register in DB
+    # Ensure user exists in both tg_users and sh_users BEFORE touching sh_mirrors
+    tg_users.upsert(
+        user_id=user.id,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        username=user.username,
+    )
+    sh_users.upsert(user.id, user.username or "", user.first_name or "")
+
+    # Register mirror in DB
     mirror = sh_mirrors.create(
         owner_id=user.id,
         bot_token=token,
@@ -60,5 +69,6 @@ async def cmd_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Signal the runner to start this mirror bot
     if "mirror_runner" in context.application.bot_data:
         runner = context.application.bot_data["mirror_runner"]
-        asyncio.create_task(runner.start_mirror(mirror["id"], token))
+        userbot = context.application.bot_data.get("userbot_client")
+        asyncio.create_task(runner.start_mirror(mirror["id"], token, userbot_client=userbot))
         logger.info("Triggered start for new mirror bot @%s", bot_info.username)

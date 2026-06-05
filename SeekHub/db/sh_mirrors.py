@@ -61,9 +61,22 @@ def increment_query_count(mirror_id: int):
         conn.commit()
 
 
-def track_mirror_user(mirror_id: int, user_id: int):
+def track_mirror_user(mirror_id: int, user_id: int, username: str = None, first_name: str = None):
+    """
+    Record that a user used this mirror.
+    Upserts sh_users first to satisfy the FK constraint — every mirror user
+    becomes a SeekHub user automatically on first query.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Ensure user exists in sh_users (FK requirement)
+            cur.execute("""
+                INSERT INTO sh_users (id, username, first_name)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (id) DO NOTHING
+            """, (user_id, username or "", first_name or "Unknown"))
+
+            # Now safe to insert into sh_mirror_users
             cur.execute("""
                 INSERT INTO sh_mirror_users (mirror_id, user_id, last_used, query_count)
                 VALUES (%s,%s,NOW(),1)

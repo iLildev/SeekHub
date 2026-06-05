@@ -15,21 +15,26 @@ logger = logging.getLogger(__name__)
 
 class MirrorRunner:
     def __init__(self):
-        self._tasks: dict[int, asyncio.Task] = {}          # mirror_id → task
-        self._apps:  dict[int, Application]  = {}          # mirror_id → app
+        self._tasks: dict[int, asyncio.Task] = {}
+        self._apps:  dict[int, Application]  = {}
 
-    async def start_all(self, mirrors: list[dict]):
+    async def start_all(self, mirrors: list[dict], userbot_client=None):
         """Called at startup to launch all active mirrors from DB."""
         for m in mirrors:
-            await self.start_mirror(m["id"], m["bot_token"])
+            await self.start_mirror(m["id"], m["bot_token"], userbot_client=userbot_client)
 
-    async def start_mirror(self, mirror_id: int, token: str):
+    async def start_mirror(self, mirror_id: int, token: str, userbot_client=None):
         """Start a single mirror bot. Safe to call for already-running mirrors."""
         if mirror_id in self._tasks and not self._tasks[mirror_id].done():
             logger.info("Mirror %d already running — skipping", mirror_id)
             return
 
         app = build_mirror_app(token, mirror_id)
+
+        # Share userbot with mirror so /near, /track, /user can use MTProto
+        if userbot_client:
+            app.bot_data["userbot_client"] = userbot_client
+
         self._apps[mirror_id] = app
 
         task = asyncio.create_task(
@@ -37,7 +42,13 @@ class MirrorRunner:
             name=f"mirror-{mirror_id}",
         )
         self._tasks[mirror_id] = task
-        logger.info("Started mirror bot %d", mirror_id)
+        logger.info("Started mirror bot %d (userbot=%s)", mirror_id, "✅" if userbot_client else "❌")
+
+    def attach_userbot(self, userbot_client):
+        """Attach userbot to all currently running mirror apps."""
+        for mid, app in self._apps.items():
+            app.bot_data["userbot_client"] = userbot_client
+            logger.info("Attached userbot to mirror %d", mid)
 
     async def stop_mirror(self, mirror_id: int):
         app = self._apps.get(mirror_id)
@@ -69,7 +80,6 @@ class MirrorRunner:
             await app.updater.start_polling(
                 allowed_updates=["message", "callback_query", "chat_member"],
             )
-            # Keep running until cancelled
             while True:
                 await asyncio.sleep(3600)
         except asyncio.CancelledError:

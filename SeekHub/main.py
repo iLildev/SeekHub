@@ -198,11 +198,10 @@ async def main():
     init_db()
     logger.info("Database ready")
 
-    # Mirror runner
+    # Mirror runner — userbot will be attached after it starts
     runner = MirrorRunner()
     active_mirrors = get_all_active()
     logger.info("Found %d active mirror(s)", len(active_mirrors))
-    await runner.start_all(active_mirrors)
 
     # System bot
     system_app = build_system_app(bot_token, runner)
@@ -231,8 +230,15 @@ async def main():
         )
         logger.info("Collector bot started")
 
-    # Userbot (MTProto, optional but powerful)
+    # Userbot (MTProto, optional but powerful) — start BEFORE mirrors so they get the client
     userbot_client = await start_userbot(system_app)
+
+    # Now start mirrors — pass userbot so /near, /track, /user can use MTProto
+    await runner.start_all(active_mirrors, userbot_client=userbot_client)
+
+    # Also attach to already-running mirrors (if any were loaded before userbot started)
+    if userbot_client:
+        runner.attach_userbot(userbot_client)
 
     logger.info(
         "SeekHub fully operational — system bot ✅ | "
