@@ -6,6 +6,8 @@ requires-python = ">=3.11"
 dependencies = [
     "asyncpg>=0.31.0",
     "psycopg2-binary>=2.9.12",
+    "pyrogram>=2.0.106",
     "python-dotenv>=1.2.2",
     "python-telegram-bot[job-queue]>=22.7",
+    "tgcrypto>=1.2.5",
 ]
