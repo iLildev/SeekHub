@@ -4,7 +4,10 @@ mirror/main.py
 Builds the Application for a single mirror bot.
 All mirrors share the same handlers — differ only by token + mirror_id + settings.
 """
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, InlineQueryHandler
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler,
+    InlineQueryHandler, MessageHandler, filters,
+)
 
 from mirror.start      import cmd_start
 from mirror.profile    import cmd_profile
@@ -16,13 +19,13 @@ from mirror.phone      import cmd_phone
 from mirror.link       import cmd_link
 from mirror.callbacks  import handle_callback
 from mirror.inline     import handle_inline_query
+from mirror.menu       import handle_keyboard, handle_menu_callback
+
+from keyboards.mirror.main import ALL_BUTTONS
 
 
 def _guarded(handler_func, setting_key: str):
-    """
-    Wraps a command handler so it can be disabled per-mirror via settings.
-    The mirror owner sets settings[setting_key] = False to disable the command.
-    """
+    """Wrap a command so it can be disabled per-mirror via settings."""
     async def wrapper(update, context):
         settings = context.bot_data.get("settings") or {}
         if not settings.get(setting_key, True):
@@ -64,10 +67,25 @@ def build_mirror_app(token: str, mirror_id: int, settings: dict | None = None) -
     app.add_handler(CommandHandler("heatmap", _guarded(cmd_heatmap, "analyze_enabled")))
     app.add_handler(CommandHandler("export",  _guarded(cmd_export,  "export_enabled")))
 
+    # ── Persistent keyboard buttons ──────────────────────────────────────────
+    app.add_handler(MessageHandler(
+        filters.TEXT & filters.Regex(
+            "^(" + "|".join(b.replace("/", r"\/") for b in ALL_BUTTONS) + ")$"
+        ),
+        handle_keyboard,
+    ))
+
+    # ── Free-text handler (awaiting state from keyboard flow) ────────────────
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_keyboard,
+    ))
+
     # ── Inline query (type @bot <query> from any chat) ───────────────────────
     app.add_handler(InlineQueryHandler(handle_inline_query))
 
     # ── Callbacks ────────────────────────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^kb_"))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
     return app
