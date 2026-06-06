@@ -189,6 +189,19 @@ async def handle_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # ── Direct lookup: @username or numeric ID sent without any command ──────
+    is_username = text.startswith("@") and len(text) > 1
+    is_numeric  = text.lstrip("-").isdigit() and len(text) >= 5
+
+    if is_username or is_numeric:
+        track_mirror_user(mirror_id, user.id,
+                          username=user.username, first_name=user.first_name)
+        increment_query_count(mirror_id)
+        log_query(mirror_id, text)
+        context.user_data.pop("awaiting", None)
+        await _do_direct_lookup(update, text, user.id)
+        return
+
     # ── Free-text: process awaited input ─────────────────────────────────────
     awaiting = context.user_data.get("awaiting")
     if awaiting and text:
@@ -198,6 +211,66 @@ async def handle_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         increment_query_count(mirror_id)
         log_query(mirror_id, text)
         await _do_search(update, text, user.id)
+
+
+# ── Direct lookup: @username or numeric ID → full profile card ───────────────
+
+async def _do_direct_lookup(update: Update, query: str, searcher_id: int):
+    """
+    Called when the user sends a bare @username or numeric ID.
+    Tries users first, then chats, then returns a full profile card.
+    """
+    arg = query.lstrip("@")
+
+    # ── Numeric ID ────────────────────────────────────────────────────────────
+    if query.lstrip("-").isdigit():
+        entity_id = int(query)
+        user = tg_users.get(entity_id)
+        if user:
+            if _is_shadow(user["id"], searcher_id):
+                await update.message.reply_text(
+                    "😔 هذا المستخدم أخفى نفسه من نتائج البحث\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2,
+                )
+                return
+            await _send_user(update, user, searcher_id)
+            return
+
+        chat = tg_chats.get(entity_id)
+        if chat:
+            from mirror.search import _send_chat_result
+            await _send_chat_result(update, chat, full=True)
+            return
+
+        await update.message.reply_text(
+            f"😔 لا يوجد مستخدم أو مجموعة بالـ ID `{entity_id}` في قاعدة البيانات\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return
+
+    # ── @username — try user first, then chat ─────────────────────────────────
+    user = tg_users.get_by_username(arg)
+    if user:
+        if _is_shadow(user["id"], searcher_id):
+            await update.message.reply_text(
+                "😔 هذا المستخدم أخفى نفسه من نتائج البحث\\.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            return
+        await _send_user(update, user, searcher_id)
+        return
+
+    chat = tg_chats.get_by_username(arg)
+    if chat:
+        from mirror.search import _send_chat_result
+        await _send_chat_result(update, chat, full=True)
+        return
+
+    await update.message.reply_text(
+        f"😔 لا يوجد نتائج لـ `{escape(query)}` في قاعدة البيانات\\.\n\n"
+        "_جرب البحث بالاسم عبر زر 🔍 Search_",
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
 
 
 # ── Search: users + groups + channels + bots ─────────────────────────────────
