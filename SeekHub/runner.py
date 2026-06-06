@@ -82,7 +82,13 @@ class MirrorRunner:
             await app.initialize()
             await app.start()
             await app.updater.start_polling(
-                allowed_updates=["message", "callback_query", "chat_member", "inline_query"],
+                drop_pending_updates=True,
+                allowed_updates=[
+                    "message",
+                    "callback_query",
+                    "chat_member",
+                    "inline_query",
+                ],
             )
             while True:
                 await asyncio.sleep(3600)

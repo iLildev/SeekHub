@@ -19,7 +19,10 @@ from mirror.phone      import cmd_phone
 from mirror.link       import cmd_link
 from mirror.callbacks  import handle_callback
 from mirror.inline     import handle_inline_query
-from mirror.menu       import handle_keyboard, handle_menu_callback
+from mirror.menu       import (
+    handle_keyboard, handle_menu_callback,
+    handle_users_shared, handle_chat_shared,
+)
 
 from keyboards.mirror.main import ALL_BUTTONS
 
@@ -43,7 +46,7 @@ def build_mirror_app(token: str, mirror_id: int, settings: dict | None = None) -
     app.bot_data["mirror_id"] = mirror_id
     app.bot_data["settings"]  = settings or {}
 
-    # ── Search & lookup ──────────────────────────────────────────────────────
+    # ── Core commands ─────────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",   cmd_start))
     app.add_handler(CommandHandler("search",  cmd_search))
     app.add_handler(CommandHandler("id",      cmd_id))
@@ -53,38 +56,49 @@ def build_mirror_app(token: str, mirror_id: int, settings: dict | None = None) -
     app.add_handler(CommandHandler("near",    _guarded(cmd_near,    "near_enabled")))
     app.add_handler(CommandHandler("phone",   _guarded(cmd_phone,   "phone_enabled")))
 
-    # ── Profile & referrals ──────────────────────────────────────────────────
+    # ── Profile & referrals ───────────────────────────────────────────────────
     app.add_handler(CommandHandler("profile", cmd_profile))
     app.add_handler(CommandHandler("link",    cmd_link))
 
-    # ── Tracking ─────────────────────────────────────────────────────────────
+    # ── Tracking ──────────────────────────────────────────────────────────────
     app.add_handler(CommandHandler("track",   cmd_track))
     app.add_handler(CommandHandler("untrack", cmd_untrack))
     app.add_handler(CommandHandler("tracks",  cmd_tracks))
 
-    # ── Analysis & export ────────────────────────────────────────────────────
+    # ── Analysis & export ─────────────────────────────────────────────────────
     app.add_handler(CommandHandler("analyze", _guarded(cmd_analyze, "analyze_enabled")))
     app.add_handler(CommandHandler("heatmap", _guarded(cmd_heatmap, "analyze_enabled")))
     app.add_handler(CommandHandler("export",  _guarded(cmd_export,  "export_enabled")))
 
-    # ── Persistent keyboard buttons ──────────────────────────────────────────
+    # ── Native picker results (highest priority) ──────────────────────────────
     app.add_handler(MessageHandler(
-        filters.TEXT & filters.Regex(
-            "^(" + "|".join(b.replace("/", r"\/") for b in ALL_BUTTONS) + ")$"
-        ),
-        handle_keyboard,
+        filters.StatusUpdate.USERS_SHARED,
+        handle_users_shared,
+    ))
+    app.add_handler(MessageHandler(
+        filters.StatusUpdate.CHAT_SHARED,
+        handle_chat_shared,
     ))
 
-    # ── Free-text handler (awaiting state from keyboard flow) ────────────────
+    # ── Persistent keyboard text buttons ──────────────────────────────────────
+    if ALL_BUTTONS:
+        escaped = [b.replace("\\", "\\\\").replace("/", r"\/") for b in ALL_BUTTONS]
+        pattern = "^(" + "|".join(escaped) + ")$"
+        app.add_handler(MessageHandler(
+            filters.TEXT & filters.Regex(pattern),
+            handle_keyboard,
+        ))
+
+    # ── Free-text (awaiting state) ────────────────────────────────────────────
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
         handle_keyboard,
     ))
 
-    # ── Inline query (type @bot <query> from any chat) ───────────────────────
+    # ── Inline query ──────────────────────────────────────────────────────────
     app.add_handler(InlineQueryHandler(handle_inline_query))
 
-    # ── Callbacks ────────────────────────────────────────────────────────────
+    # ── Callbacks ─────────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^kb_"))
     app.add_handler(CallbackQueryHandler(handle_callback))
 

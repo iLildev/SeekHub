@@ -1,8 +1,9 @@
 """
 mirror/menu.py
 ==============
-Handles all persistent keyboard button presses and the conversational
-"awaiting input" state for Search/Seek and Select flows.
+Handles all persistent keyboard button presses, native Telegram
+UsersShared / ChatShared events, and the conversational "awaiting input"
+state for free-text Search/Seek flow.
 """
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -14,12 +15,13 @@ from db.sh_mirrors import increment_query_count, track_mirror_user, log_query
 from utils.fmt import escape, user_line, chat_line
 from keyboards.mirror.main import (
     main_keyboard, select_keyboard,
-    BTN_SEARCH, BTN_MENU, BTN_SELECT,
-    BTN_GROUP, BTN_USER, BTN_CHANNEL, BTN_BOT, BTN_BACK,
+    BTN_SEARCH, BTN_MENU, BTN_SELECT, BTN_BACK,
     ALL_BUTTONS,
+    REQ_USER, REQ_BOT, REQ_GROUP, REQ_CHANNEL,
 )
 
 logger = logging.getLogger(__name__)
+
 
 # ── Inline menu shown when pressing 📋 Menu ───────────────────────────────────
 
@@ -44,29 +46,117 @@ def _menu_inline() -> InlineKeyboardMarkup:
     ])
 
 
-# ── Prompt texts ──────────────────────────────────────────────────────────────
+# ── Handle UsersShared (👤 User / 🤖 Bot native picker) ──────────────────────
 
-_PROMPTS = {
-    "search":  "🔍 *Search SeekHub*\n\nType any name, @username, or keyword\\.\nI'll search across users, groups, channels and bots\\.",
-    "user":    "👤 *User Lookup*\n\nSend a @username or Telegram ID\\.",
-    "group":   "👥 *Group Lookup*\n\nSend the group @username, invite link, or ID\\.",
-    "channel": "📢 *Channel Lookup*\n\nSend the channel @username or ID\\.",
-    "bot":     "🤖 *Bot Lookup*\n\nSend the bot @username or ID\\.",
-}
+async def handle_users_shared(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Called when the user picks a user/bot via the native Telegram picker."""
+    msg       = update.message
+    shared    = msg.users_shared          # UsersShared object
+    req_id    = shared.request_id
+    mirror_id = context.bot_data.get("mirror_id", 0)
+    user      = update.effective_user
+    bots_only = (req_id == REQ_BOT)
+
+    track_mirror_user(mirror_id, user.id,
+                      username=user.username, first_name=user.first_name)
+    increment_query_count(mirror_id)
+
+    # shared.users is a list of SharedUser objects
+    for shared_user in shared.users:
+        uid = shared_user.user_id
+        log_query(mirror_id, str(uid))
+
+        record = tg_users.get(uid)
+        if not record:
+            await msg.reply_text(
+                f"😔 User `{uid}` not found in SeekHub database\\.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            continue
+
+        if bots_only and not record.get("is_bot"):
+            await msg.reply_text(
+                f"⚠️ `{escape(record.get('username', str(uid)))}` is not a bot\\.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            continue
+
+        if _is_shadow(uid, user.id):
+            await msg.reply_text(
+                "😔 This user has hidden themselves from search results\\.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            continue
+
+        await _send_user(update, record, user.id)
 
 
-# ── Main dispatcher ───────────────────────────────────────────────────────────
+# ── Handle ChatShared (👥 Group / 📢 Channel native picker) ──────────────────
+
+async def handle_chat_shared(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Called when the user picks a group/channel via the native Telegram picker."""
+    msg       = update.message
+    shared    = msg.chat_shared           # ChatShared object
+    req_id    = shared.request_id
+    mirror_id = context.bot_data.get("mirror_id", 0)
+    user      = update.effective_user
+    chat_type = "channel" if req_id == REQ_CHANNEL else "group"
+
+    track_mirror_user(mirror_id, user.id,
+                      username=user.username, first_name=user.first_name)
+    increment_query_count(mirror_id)
+
+    cid = shared.chat_id
+    log_query(mirror_id, str(cid))
+
+    record = tg_chats.get(cid)
+    if not record:
+        # Try by username if provided
+        if hasattr(shared, "username") and shared.username:
+            record = tg_chats.get_by_username(shared.username)
+
+    if not record:
+        icon = "📢" if chat_type == "channel" else "👥"
+        name = getattr(shared, "title", None) or str(cid)
+        await msg.reply_text(
+            f"😔 {icon} *{escape(name)}* not found in SeekHub database\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return
+
+    # Type mismatch guard
+    actual_type = record.get("type", "")
+    if chat_type == "channel" and actual_type != "channel":
+        await msg.reply_text(
+            "⚠️ This is a group, not a channel\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return
+    if chat_type == "group" and actual_type == "channel":
+        await msg.reply_text(
+            "⚠️ This is a channel, not a group\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+        return
+
+    from mirror.search import _send_chat_result
+    await _send_chat_result(update, record, full=True)
+
+
+# ── Main text-button dispatcher ───────────────────────────────────────────────
 
 async def handle_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text      = update.message.text
+    """Handles text keyboard buttons + free-text awaiting flow."""
+    text      = (update.message.text or "").strip()
     mirror_id = context.bot_data.get("mirror_id", 0)
     user      = update.effective_user
 
-    # ── Navigation buttons ────────────────────────────────────────────────────
+    # ── Navigation ────────────────────────────────────────────────────────────
     if text == BTN_SELECT:
         context.user_data.pop("awaiting", None)
         await update.message.reply_text(
-            "🎯 *Select what to look up:*",
+            "🎯 *Select what to look up:*\n\n"
+            "Tap a button — Telegram will open its native picker\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
             reply_markup=select_keyboard(),
         )
@@ -89,72 +179,25 @@ async def handle_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ── Awaiting triggers ─────────────────────────────────────────────────────
     if text == BTN_SEARCH:
         context.user_data["awaiting"] = "search"
         await update.message.reply_text(
-            _PROMPTS["search"],
+            "🔍 *Search SeekHub*\n\n"
+            "Type any name, @username, or keyword\\.\n"
+            "I'll search across users, groups, channels and bots\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
 
-    if text == BTN_USER:
-        context.user_data["awaiting"] = "user"
-        await update.message.reply_text(
-            _PROMPTS["user"],
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        return
-
-    if text == BTN_GROUP:
-        context.user_data["awaiting"] = "group"
-        await update.message.reply_text(
-            _PROMPTS["group"],
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        return
-
-    if text == BTN_CHANNEL:
-        context.user_data["awaiting"] = "channel"
-        await update.message.reply_text(
-            _PROMPTS["channel"],
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        return
-
-    if text == BTN_BOT:
-        context.user_data["awaiting"] = "bot"
-        await update.message.reply_text(
-            _PROMPTS["bot"],
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        return
-
-    # ── Process awaited input ─────────────────────────────────────────────────
+    # ── Free-text: process awaited input ─────────────────────────────────────
     awaiting = context.user_data.get("awaiting")
-    if awaiting:
+    if awaiting and text:
         context.user_data.pop("awaiting", None)
         track_mirror_user(mirror_id, user.id,
                           username=user.username, first_name=user.first_name)
         increment_query_count(mirror_id)
         log_query(mirror_id, text)
-        await _dispatch(update, context, awaiting, text, user.id)
-
-
-# ── Search dispatcher ─────────────────────────────────────────────────────────
-
-async def _dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE,
-                    mode: str, query: str, searcher_id: int):
-    query = query.strip()
-
-    if mode == "search":
-        await _do_search(update, query, searcher_id)
-
-    elif mode in ("user", "bot"):
-        await _do_user(update, context, query, searcher_id, bots_only=(mode == "bot"))
-
-    elif mode in ("group", "channel"):
-        await _do_chat(update, query, chat_type=mode)
+        await _do_search(update, text, user.id)
 
 
 # ── Search: users + groups + channels + bots ─────────────────────────────────
@@ -162,16 +205,13 @@ async def _dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE,
 async def _do_search(update: Update, query: str, searcher_id: int):
     arg = query.lstrip("@")
 
-    # Exact username try first
     exact = tg_users.get_by_username(arg)
     if exact and not _is_shadow(exact["id"], searcher_id):
         await _send_user(update, exact, searcher_id)
         return
 
-    # Full-text across users + chats
     users = tg_users.search(query, limit=4)
     chats = tg_chats.search(query, limit=6)
-
     users = [u for u in users if not _is_shadow(u["id"], searcher_id)]
 
     if not users and not chats:
@@ -190,10 +230,8 @@ async def _do_search(update: Update, query: str, searcher_id: int):
             lines.append(user_line(u))
 
     if chats:
-        # Separate by type
         groups   = [c for c in chats if c["type"] in ("group", "supergroup", "gigagroup")]
         channels = [c for c in chats if c["type"] == "channel"]
-
         if groups:
             lines.append("\n*👥 Groups*")
             for c in groups:
@@ -213,103 +251,6 @@ async def _do_search(update: Update, query: str, searcher_id: int):
     )
 
 
-# ── User / Bot lookup ─────────────────────────────────────────────────────────
-
-async def _do_user(update: Update, context: ContextTypes.DEFAULT_TYPE,
-                   query: str, searcher_id: int, bots_only: bool = False):
-    arg = query.lstrip("@")
-    user = None
-    try:
-        user = tg_users.get(int(arg))
-    except ValueError:
-        user = tg_users.get_by_username(arg)
-
-    if not user:
-        # Try userbot resolve
-        ub = context.bot_data.get("userbot_client")
-        if ub and ub.is_connected:
-            try:
-                from userbot.scraper import resolve_username, index_user_profile
-                uid = await resolve_username(ub, arg)
-                if uid:
-                    await index_user_profile(ub, uid)
-                    user = tg_users.get(uid)
-            except Exception:
-                pass
-
-    if not user:
-        await update.message.reply_text(
-            f"😔 `{escape(arg)}` not found in SeekHub database\\.",
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        return
-
-    if bots_only and not user.get("is_bot"):
-        await update.message.reply_text(
-            f"⚠️ `{escape(arg)}` is not a bot\\.",
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        return
-
-    if _is_shadow(user["id"], searcher_id):
-        await update.message.reply_text(
-            "😔 This user is not visible in search results\\.",
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        return
-
-    await _send_user(update, user, searcher_id)
-
-
-# ── Chat / Channel lookup ─────────────────────────────────────────────────────
-
-async def _do_chat(update: Update, query: str, chat_type: str):
-    arg = query.lstrip("@")
-    chat = None
-    try:
-        chat = tg_chats.get(int(arg))
-    except ValueError:
-        chat = tg_chats.get_by_username(arg)
-
-    if not chat:
-        results = tg_chats.search(query, limit=5)
-        if chat_type == "channel":
-            results = [c for c in results if c["type"] == "channel"]
-        else:
-            results = [c for c in results if c["type"] in ("group", "supergroup", "gigagroup")]
-
-        if not results:
-            icon = "📢" if chat_type == "channel" else "👥"
-            await update.message.reply_text(
-                f"😔 {icon} No {chat_type} found for `{escape(query)}`\\.",
-                parse_mode=ParseMode.MARKDOWN_V2,
-            )
-            return
-
-        lines = [f"{'📢' if chat_type == 'channel' else '👥'} *Results for* `{escape(query)}`\n"]
-        for c in results:
-            lines.append(chat_line(c))
-        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
-        return
-
-    # Verify type matches
-    if chat_type == "channel" and chat["type"] != "channel":
-        await update.message.reply_text(
-            f"⚠️ This is a group, not a channel\\. Use 👥 *Group* instead\\.",
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        return
-    if chat_type == "group" and chat["type"] == "channel":
-        await update.message.reply_text(
-            f"⚠️ This is a channel, not a group\\. Use 📢 *Channel* instead\\.",
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        return
-
-    from mirror.search import _send_chat_result
-    await _send_chat_result(update, chat, full=True)
-
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _is_shadow(user_id: int, searcher_id: int) -> bool:
@@ -324,7 +265,7 @@ async def _send_user(update: Update, user: dict, searcher_id: int):
     await _send_user_result(update, user, full=True, searcher_id=searcher_id)
 
 
-# ── Inline menu callbacks ─────────────────────────────────────────────────────
+# ── Inline menu callbacks (kb_*) ──────────────────────────────────────────────
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle callbacks from the 📋 Menu inline keyboard."""
@@ -333,27 +274,27 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     data  = query.data
 
     routes = {
-        "kb_profile": "/profile",
-        "kb_link":    "/link",
-        "kb_tracks":  "/tracks",
-        "kb_export":  "/export",
+        "kb_profile": "`/profile`",
+        "kb_link":    "`/link`",
+        "kb_tracks":  "`/tracks`",
+        "kb_export":  "`/export`",
     }
 
     prompts = {
-        "kb_near":  ("near", "📍 Send a @username to find nearby users:"),
-        "kb_phone": ("phone", "📞 Send the phone number \\(e\\.g\\. \\+12345678900\\):"),
+        "kb_near":  ("near",         "📍 Send a @username to find nearby users:"),
+        "kb_phone": ("phone",        "📞 Send the phone number \\(e\\.g\\. \\+12345678900\\):"),
         "kb_track": ("track_prompt", "👁 Send @username to track:"),
     }
 
     if data in routes:
         await query.message.reply_text(
-            f"Use the command: `{routes[data]}`",
+            f"Use the command: {routes[data]}",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
 
     if data in prompts:
         key, prompt_text = prompts[data]
-        context.user_data["awaiting_cmd"] = key
+        context.user_data["awaiting"] = key
         await query.message.reply_text(prompt_text, parse_mode=ParseMode.MARKDOWN_V2)
         return
