@@ -112,7 +112,7 @@ async def cmd_track(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 cur.execute("""
                     INSERT INTO tg_tracking (tracker_user_id, target_user_id, track_type)
                     VALUES (%s, %s, %s)
-                    ON CONFLICT DO NOTHING
+                    ON CONFLICT (tracker_user_id, target_user_id, track_type) DO NOTHING
                 """, (uid, user["id"], t))
                 if cur.rowcount:
                     added.append(t)

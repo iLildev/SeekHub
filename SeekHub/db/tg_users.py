@@ -200,8 +200,11 @@ def get_message_stats(user_id: int):
             return cur.fetchone()
 
 
-def search(query: str, limit: int = 10):
+def search(query: str, limit: int = 10, offset: int = 0):
     """Full-text search across user display names and usernames."""
+    clean = query.lstrip("@").strip()
+    if not clean:
+        return []
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -211,8 +214,8 @@ def search(query: str, limit: int = 10):
                 WHERE si.entity_type = 'user'
                   AND si.search_vec @@ plainto_tsquery('simple', %s)
                 ORDER BY ts_rank(si.search_vec, plainto_tsquery('simple', %s)) DESC
-                LIMIT %s
-            """, (query, query, limit))
+                LIMIT %s OFFSET %s
+            """, (clean, clean, limit, offset))
             return cur.fetchall()
 
 

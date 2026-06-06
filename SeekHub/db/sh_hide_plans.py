@@ -72,11 +72,9 @@ def record_star_payment(user_id: int, charge_id: str, stars: int, purpose: str, 
 
 
 def notify_searcher(target_user_id: int, searcher_user_id: int):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO sh_analytics_events
-                    (recipient_user_id, event_type, payload)
-                VALUES (%s, 'spy_alert', %s::jsonb)
-            """, (target_user_id, f'{{"searcher_id": {searcher_user_id}}}'))
-        conn.commit()
+    from db import sh_channel_analytics
+    sh_channel_analytics.queue_event(
+        recipient_user_id=target_user_id,
+        event_type="spy_alert",
+        payload={"searcher_id": searcher_user_id},
+    )

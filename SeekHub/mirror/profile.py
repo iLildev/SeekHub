@@ -46,7 +46,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💎 Crystals: `{crystals}`",
         f"🌟 Aura: `{aura}`",
         f"👥 Referrals: `{refs}`",
-        f"\n🔗 Your referral:\n`https://t\\.me/{escape(context.bot.username)}?start={user.id}`",
+        f"\n🔗 Your referral:\n`https://t\\.me/{escape(context.bot.username)}?start=ref_{user.id}`",
     ]
 
     await update.message.reply_text(

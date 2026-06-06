@@ -156,14 +156,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── search_more:<query>:<offset> ──────────────────────────────────────────
     elif data.startswith("search_more:"):
-        parts  = data.split(":", 2)
-        q, offset = parts[1], int(parts[2])
-        users  = tg_users.search(q, limit=5)
-        chats  = tg_chats.search(q, limit=5)
+        parts         = data.split(":", 2)
+        q, offset     = parts[1], int(parts[2])
+        PAGE          = 5
+        users         = tg_users.search(q, limit=PAGE, offset=offset)
+        chats         = tg_chats.search(q, limit=PAGE, offset=offset)
         if not users and not chats:
             await query.answer("No more results.", show_alert=True)
             return
-        lines = [f"🔍 *More results for* `{escape(q)}`\n"]
+        page_num = offset // PAGE + 1
+        lines = [f"🔍 *Results for* `{escape(q)}` \\(page {page_num}\\)\n"]
         for u in users: lines.append(user_line(u))
         for c in chats: lines.append(chat_line(c))
-        await query.edit_message_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+        kb = []
+        if offset > 0:
+            kb.append(InlineKeyboardButton("◀️ Prev", callback_data=f"search_more:{q}:{offset - PAGE}"))
+        if len(users) == PAGE or len(chats) == PAGE:
+            kb.append(InlineKeyboardButton("Next ▶️", callback_data=f"search_more:{q}:{offset + PAGE}"))
+        await query.edit_message_text(
+            "\n".join(lines),
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=InlineKeyboardMarkup([kb]) if kb else None,
+        )

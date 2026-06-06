@@ -126,14 +126,17 @@ def get_top_posters(chat_id: int, limit: int = 10):
             return cur.fetchall()
 
 
-def search(query: str, type_filter: str = None, limit: int = 10):
+def search(query: str, type_filter: str = None, limit: int = 10, offset: int = 0):
+    clean = query.lstrip("@").strip()
+    if not clean:
+        return []
     with get_conn() as conn:
         with conn.cursor() as cur:
             type_clause = "AND c.type = %s" if type_filter else ""
-            params = [query, query]
+            params = [clean, clean]
             if type_filter:
                 params.append(type_filter)
-            params.append(limit)
+            params += [limit, offset]
 
             cur.execute(f"""
                 SELECT c.id, c.type, c.title, c.username, c.member_count,
@@ -145,7 +148,7 @@ def search(query: str, type_filter: str = None, limit: int = 10):
                   {type_clause}
                 ORDER BY ts_rank(si.search_vec, plainto_tsquery('simple', %s)) DESC,
                          c.member_count DESC NULLS LAST
-                LIMIT %s
+                LIMIT %s OFFSET %s
             """, params)
             return cur.fetchall()
 

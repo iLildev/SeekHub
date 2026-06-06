@@ -15,9 +15,6 @@ from utils.fmt import escape
 
 async def _near_results(uid: int) -> str:
     """Shared logic — returns formatted text for /near and callback."""
-    from db.connection import get_conn
-    from db import tg_users
-
     user = tg_users.get(uid)
     if not user:
         return f"😔 User `{uid}` not found\\."
