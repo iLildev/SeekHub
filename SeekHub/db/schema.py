@@ -548,6 +548,20 @@ CREATE INDEX IF NOT EXISTS idx_analytics_events_pending
 ALTER TABLE sh_mirror_queries ADD COLUMN IF NOT EXISTS user_id BIGINT;
 CREATE INDEX IF NOT EXISTS idx_mirror_queries_user_date
     ON sh_mirror_queries(user_id, queried_at) WHERE user_id IS NOT NULL;
+
+-- ─────────────────────────────────────────────
+--  PROFILE VIEWS: Track who viewed who
+-- ─────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS tg_profile_views (
+    id             BIGSERIAL PRIMARY KEY,
+    target_user_id BIGINT NOT NULL REFERENCES tg_users(id) ON DELETE CASCADE,
+    viewer_user_id BIGINT NOT NULL,
+    viewed_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_profile_views_target ON tg_profile_views(target_user_id);
+CREATE INDEX IF NOT EXISTS idx_profile_views_viewer ON tg_profile_views(viewer_user_id);
 """
 
 

@@ -1,15 +1,59 @@
 """
 mirror/callbacks.py
 ===================
-Handles all inline keyboard callback queries from mirror bots.
+Handles ALL inline keyboard callback queries from mirror bots.
+
+Crystal-gated callbacks (crystal_*):
+  Each costs a fixed number of crystals drawn from the tapping user's balance.
+  If insufficient balance → show_alert with earn instructions.
+  If enough → deduct, show_alert with new balance, send the data.
 """
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
-from db import tg_users, tg_chats, tg_messages
+from db import tg_users, tg_chats, tg_messages, sh_crystals
 from utils.fmt import escape, user_line, chat_line
 
+# Crystal costs (keep in sync with search.py CRYSTAL_COSTS)
+COSTS = {
+    "names":     7,
+    "groups":   15,
+    "messages": 20,
+    "channels": 15,
+    "friends":   8,
+    "reactions": 10,
+}
+
+
+# ── Crystal gate helper ───────────────────────────────────────────────────────
+
+async def _crystal_gate(query, cost: int, feature: str) -> bool:
+    """
+    Check balance, deduct crystals.
+    Returns True if deduction succeeded.
+    Shows a Telegram alert (popup) either way.
+    """
+    user_id = query.from_user.id
+    balance = sh_crystals.get_balance(user_id)
+
+    if balance < cost:
+        await query.answer(
+            f"❌ Need {cost}💠 — you have {balance}💠\n"
+            f"Earn more: /link (referrals +10💠) | /submit (+8💠)",
+            show_alert=True,
+        )
+        return False
+
+    sh_crystals.deduct(user_id, cost, f"view_{feature}")
+    await query.answer(
+        f"💠 -{cost} crystals | Remaining: {balance - cost}💠",
+        show_alert=False,
+    )
+    return True
+
+
+# ── Main dispatcher ───────────────────────────────────────────────────────────
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -18,8 +62,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── mutual:<user_id> ──────────────────────────────────────────────────────
     if data.startswith("mutual:"):
-        _, uid = data.split(":", 1)
-        uid    = int(uid)
+        uid    = int(data.split(":", 1)[1])
         viewer = update.effective_user.id
         mutuals = tg_users.get_mutual_chats(viewer, uid)
         if not mutuals:
@@ -34,8 +77,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── near:<user_id> ────────────────────────────────────────────────────────
     elif data.startswith("near:"):
-        _, uid = data.split(":", 1)
-        uid = int(uid)
+        uid = int(data.split(":", 1)[1])
         from mirror.near import _near_results
         text = await _near_results(uid)
         await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN_V2)
@@ -68,24 +110,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── chat_msgs:<chat_id>:<offset> ──────────────────────────────────────────
     elif data.startswith("chat_msgs:"):
         _, cid, offset = data.split(":")
-        cid, offset    = int(cid), int(offset)
+        cid, offset = int(cid), int(offset)
         from db.connection import get_conn
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT m.message_id, m.text, m.caption, m.media_type,
-                           m.date, m.sender_id, u.first_name
+                    SELECT m.message_id, m.text, m.caption, m.date, m.sender_id, u.first_name
                     FROM tg_messages m
                     LEFT JOIN tg_users u ON u.id = m.sender_id
-                    WHERE m.chat_id = %s
-                    ORDER BY m.date DESC
-                    LIMIT 5 OFFSET %s
+                    WHERE m.chat_id = %s ORDER BY m.date DESC LIMIT 5 OFFSET %s
                 """, (cid, offset))
                 msgs = cur.fetchall()
         if not msgs:
             await query.answer("No more messages.", show_alert=True)
             return
-        lines = [f"💬 *Messages in chat* \\(page {offset//5+1}\\)\n"]
+        lines = [f"💬 *Messages* \\(page {offset//5+1}\\)\n"]
         for m in msgs:
             text     = escape((m["text"] or m["caption"] or "")[:80].replace("\n", " "))
             sender   = escape(m["first_name"] or "Unknown")
@@ -105,7 +144,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── members:<chat_id>:<offset> ────────────────────────────────────────────
     elif data.startswith("members:"):
         _, cid, offset = data.split(":")
-        cid, offset    = int(cid), int(offset)
+        cid, offset = int(cid), int(offset)
         members = tg_chats.get_members(cid, limit=10, offset=offset)
         if not members:
             await query.answer("No more members.", show_alert=True)
@@ -126,8 +165,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── interactions:<user_id> ────────────────────────────────────────────────
     elif data.startswith("interactions:"):
-        _, uid = data.split(":", 1)
-        top    = tg_users.get_top_interactions(int(uid), limit=10)
+        uid = int(data.split(":", 1)[1])
+        top = tg_users.get_top_interactions(uid, limit=10)
         if not top:
             await query.edit_message_text(
                 "No interactions found\\.", parse_mode=ParseMode.MARKDOWN_V2
@@ -139,6 +178,316 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             u = f" @{escape(r['username'])}" if r.get("username") else ""
             lines.append(f"• {n}{u} — `{r['interactions']}` interactions")
         await query.edit_message_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+
+    # ── stats:<user_id> ───────────────────────────────────────────────────────
+    elif data.startswith("stats:"):
+        uid   = int(data.split(":", 1)[1])
+        user  = tg_users.get(uid)
+        if not user:
+            await query.answer("User not found.", show_alert=True)
+            return
+        stats = tg_users.get_extended_stats(uid)
+        tm    = int(stats.get("total_messages") or 0)
+        tm_m  = int(stats.get("total_media")    or 0)
+        tm_r  = int(stats.get("total_replies")  or 0)
+        tm_f  = int(stats.get("total_forwards") or 0)
+        gc    = int(stats.get("group_count")    or 0)
+        cc    = int(stats.get("channel_count")  or 0)
+        name  = escape((user.get("first_name") or "") + " " + (user.get("last_name") or "")).strip()
+        lines = [
+            f"📊 *Stats for {name}*\n",
+            f"• 💬 Messages: `{tm}`",
+            f"• 📸 Media: `{tm_m}` \\| ↩️ Replies: `{tm_r}` \\| ↪️ Forwards: `{tm_f}`",
+            f"• 👥 Groups: `{gc}` \\| 📢 Channels: `{cc}`",
+            f"• 🎥 Circles: `{stats.get('circles',0)}` \\| 🎙 Voice: `{stats.get('voice',0)}`",
+            f"• 👑 Admin in: `{stats.get('admin_count',0)}` groups",
+        ]
+        if stats.get("first_message"):
+            first_d = escape(stats["first_message"].strftime("%Y-%m-%d"))
+            last_d  = escape(stats["last_message"].strftime("%Y-%m-%d"))
+            lines.append(f"• 📅 Active: `{first_d}` → `{last_d}`")
+        await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+
+    # ── words:<user_id> ───────────────────────────────────────────────────────
+    elif data.startswith("words:"):
+        uid = int(data.split(":", 1)[1])
+        from services.nlp import get_word_frequency
+        top = get_word_frequency(uid, limit=15)
+        if not top:
+            await query.answer("No word data available.", show_alert=True)
+            return
+        user = tg_users.get(uid)
+        name = escape((user.get("first_name") or str(uid)) if user else str(uid))
+        lines = [f"🔤 *Top Words — {name}*\n"]
+        medals = ["🥇","🥈","🥉"] + ["•"] * 20
+        for i, (word, cnt) in enumerate(top):
+            lines.append(f"{medals[i]} `{escape(word)}` — {cnt}×")
+        await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+
+    # ── analysis:<user_id> ────────────────────────────────────────────────────
+    elif data.startswith("analysis:"):
+        uid = int(data.split(":", 1)[1])
+        await query.message.reply_text(
+            f"Use `/analyze {uid}` for full NLP analysis\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+
+    # ── aura:<user_id> ────────────────────────────────────────────────────────
+    elif data.startswith("aura:"):
+        uid = int(data.split(":", 1)[1])
+        from db import sh_aura
+        score = sh_aura.get_score(uid)
+        user  = tg_users.get(uid)
+        name  = escape((user.get("first_name") or str(uid)) if user else str(uid))
+        lines = [
+            f"🌟 *Reputation — {name}*\n",
+            f"• Aura score: `{score}`",
+            f"• Earned from community interactions",
+        ]
+        await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+
+    # ── track_user:<user_id> ──────────────────────────────────────────────────
+    elif data.startswith("track_user:"):
+        uid = data.split(":", 1)[1]
+        await query.message.reply_text(
+            f"Use `/track {uid}` to start tracking this user\\.",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+
+    # ── crystal_prices ────────────────────────────────────────────────────────
+    elif data == "crystal_prices":
+        lines = [
+            "💠 *Crystal Price List*\n",
+            f"• Names history — `{COSTS['names']}` 💠",
+            f"• Groups list   — `{COSTS['groups']}` 💠",
+            f"• Messages      — `{COSTS['messages']}` 💠",
+            f"• Channels list — `{COSTS['channels']}` 💠",
+            f"• Friends/interactions — `{COSTS['friends']}` 💠",
+            f"• Reaction stats  — `{COSTS['reactions']}` 💠",
+            "",
+            "*How to earn crystals:*",
+            "• Share /link — \\+10💠 per new user",
+            "• Submit group /submit — \\+8💠",
+            "• Refer friends — \\+4💠 per active ref",
+        ]
+        await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+
+    # ── crystal_names:<uid> ───────────────────────────────────────────────────
+    elif data.startswith("crystal_names:"):
+        uid  = int(data.split(":", 1)[1])
+        cost = COSTS["names"]
+        ok   = await _crystal_gate(query, cost, "names")
+        if not ok:
+            return
+
+        user = tg_users.get(uid)
+        name = escape((user.get("first_name") or str(uid)) if user else str(uid))
+
+        username_hist = tg_users.get_username_history(uid)
+        name_hist     = tg_users.get_name_history(uid)
+        bio_hist      = tg_users.get_bio_history(uid)
+
+        lines = [f"📋 *Full History — {name}*\n"]
+
+        if username_hist:
+            lines.append("*🔄 Usernames:*")
+            for h in username_hist:
+                dt = h["seen_at"].strftime("%Y\\-%m\\-%d") if h.get("seen_at") else "?"
+                lines.append(f"• `{dt}`  ➜  @{escape(h['username'])}")
+            lines.append("")
+
+        if name_hist:
+            lines.append("*📝 Names:*")
+            for h in name_hist:
+                dt      = h["seen_at"].strftime("%Y\\-%m\\-%d") if h.get("seen_at") else "?"
+                full_n  = " ".join(filter(None, [h.get("first_name"), h.get("last_name")])) or "?"
+                lines.append(f"• `{dt}`  ➜  {escape(full_n)}")
+            lines.append("")
+
+        if bio_hist:
+            lines.append("*📋 Bio changes:*")
+            for h in bio_hist[:5]:
+                dt  = h["seen_at"].strftime("%Y\\-%m\\-%d") if h.get("seen_at") else "?"
+                bio = escape((h.get("bio") or "_empty_")[:100])
+                lines.append(f"• `{dt}` — _{bio}_")
+
+        await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+
+    # ── crystal_groups:<uid> ──────────────────────────────────────────────────
+    elif data.startswith("crystal_groups:"):
+        uid  = int(data.split(":", 1)[1])
+        cost = COSTS["groups"]
+        ok   = await _crystal_gate(query, cost, "groups")
+        if not ok:
+            return
+
+        user   = tg_users.get(uid)
+        name   = escape((user.get("first_name") or str(uid)) if user else str(uid))
+        groups = tg_users.get_chats(uid, limit=30)
+        groups = [g for g in groups if g["type"] in ("group", "supergroup", "gigagroup")]
+
+        if not groups:
+            await query.message.reply_text(
+                f"😔 No groups found for *{name}*\\.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            return
+
+        lines = [f"👥 *Groups — {name}* \\({len(groups)}\\)\n"]
+        for g in groups:
+            ref  = f"@{escape(g['username'])}" if g.get("username") else escape(g.get("title") or str(g["id"]))
+            role = " 👑" if g.get("is_admin") else ""
+            lines.append(f"• {ref}{role}")
+
+        await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+
+    # ── crystal_channels:<uid> ────────────────────────────────────────────────
+    elif data.startswith("crystal_channels:"):
+        uid  = int(data.split(":", 1)[1])
+        cost = COSTS["channels"]
+        ok   = await _crystal_gate(query, cost, "channels")
+        if not ok:
+            return
+
+        user     = tg_users.get(uid)
+        name     = escape((user.get("first_name") or str(uid)) if user else str(uid))
+        channels = tg_users.get_user_channels(uid, limit=25)
+
+        if not channels:
+            await query.message.reply_text(
+                f"😔 No channels found for *{name}*\\.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            return
+
+        lines = [f"📢 *Channels — {name}* \\({len(channels)}\\)\n"]
+        for c in channels:
+            ref   = f"@{escape(c['username'])}" if c.get("username") else escape(c.get("title") or str(c["id"]))
+            count = c.get("message_count", 0)
+            lines.append(f"• {ref} — `{count}` msgs")
+
+        await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+
+    # ── crystal_msgs:<uid>:<offset> ───────────────────────────────────────────
+    elif data.startswith("crystal_msgs:"):
+        parts  = data.split(":")
+        uid    = int(parts[1])
+        offset = int(parts[2])
+        cost   = COSTS["messages"] if offset == 0 else 0  # only charge first page
+
+        if offset == 0:
+            ok = await _crystal_gate(query, cost, "messages")
+            if not ok:
+                return
+        else:
+            await query.answer()
+
+        msgs = tg_messages.get_user_messages(uid, limit=5, offset=offset)
+        if not msgs:
+            await query.answer("No more messages.", show_alert=True)
+            return
+
+        user = tg_users.get(uid)
+        name = escape((user.get("first_name") or str(uid)) if user else str(uid))
+        lines = [f"💬 *Messages — {name}* \\(page {offset//5+1}\\)\n"]
+        for m in msgs:
+            text     = escape((m["text"] or m["caption"] or "")[:100])
+            chat_ref = escape(m.get("chat_username") or m.get("chat_title") or str(m["chat_id"]))
+            date_str = m["date"].strftime("%Y\\-%m\\-%d") if m["date"] else "?"
+            lines.append(f"• {chat_ref}\n  `{text}`\n  _{date_str}_")
+
+        kb = []
+        if offset > 0:
+            kb.append(InlineKeyboardButton("◀️ Prev", callback_data=f"crystal_msgs:{uid}:{offset-5}"))
+        if len(msgs) == 5:
+            kb.append(InlineKeyboardButton("Next ▶️", callback_data=f"crystal_msgs:{uid}:{offset+5}"))
+
+        await query.message.reply_text(
+            "\n".join(lines),
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=InlineKeyboardMarkup([kb]) if kb else None,
+        )
+
+    # ── crystal_friends:<uid> ─────────────────────────────────────────────────
+    elif data.startswith("crystal_friends:"):
+        uid  = int(data.split(":", 1)[1])
+        cost = COSTS["friends"]
+        ok   = await _crystal_gate(query, cost, "friends")
+        if not ok:
+            return
+
+        top = tg_users.get_top_interactions(uid, limit=15)
+        user = tg_users.get(uid)
+        name = escape((user.get("first_name") or str(uid)) if user else str(uid))
+
+        if not top:
+            await query.message.reply_text(
+                f"😔 No interaction data for *{name}*\\.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            return
+
+        medals = ["🥇","🥈","🥉"] + ["•"] * 20
+        lines  = [f"🔗 *Friends/Interactions — {name}*\n"]
+        for i, r in enumerate(top):
+            n = escape(r["first_name"] or "Unknown")
+            u = f" @{escape(r['username'])}" if r.get("username") else ""
+            lines.append(f"{medals[i]} {n}{u} — `{r['interactions']}`×")
+
+        await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+
+    # ── crystal_reactions:<uid> ───────────────────────────────────────────────
+    elif data.startswith("crystal_reactions:"):
+        uid  = int(data.split(":", 1)[1])
+        cost = COSTS["reactions"]
+        ok   = await _crystal_gate(query, cost, "reactions")
+        if not ok:
+            return
+
+        from services.nlp import get_reaction_stats
+        reactions = get_reaction_stats(uid)
+        user = tg_users.get(uid)
+        name = escape((user.get("first_name") or str(uid)) if user else str(uid))
+
+        if not reactions:
+            await query.message.reply_text(
+                f"😔 No reaction data for *{name}*\\.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            return
+
+        lines = [f"👍 *Reactions — {name}*\n"]
+        for r in reactions:
+            lines.append(f"• {r['emoji']} — `{r['total']}`×")
+
+        await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+
+    # ── search_more:<query>:<offset> ──────────────────────────────────────────
+    elif data.startswith("search_more:"):
+        parts     = data.split(":", 2)
+        q, offset = parts[1], int(parts[2])
+        PAGE      = 5
+        users     = tg_users.search(q, limit=PAGE, offset=offset)
+        chats     = tg_chats.search(q, limit=PAGE, offset=offset)
+        if not users and not chats:
+            await query.answer("No more results.", show_alert=True)
+            return
+        page_num = offset // PAGE + 1
+        lines = [f"🔍 *Results for* `{escape(q)}` \\(page {page_num}\\)\n"]
+        for u in users:
+            lines.append(user_line(u))
+        for c in chats:
+            lines.append(chat_line(c))
+        kb = []
+        if offset > 0:
+            kb.append(InlineKeyboardButton("◀️ Prev", callback_data=f"search_more:{q}:{offset - PAGE}"))
+        if len(users) == PAGE or len(chats) == PAGE:
+            kb.append(InlineKeyboardButton("Next ▶️", callback_data=f"search_more:{q}:{offset + PAGE}"))
+        await query.edit_message_text(
+            "\n".join(lines),
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=InlineKeyboardMarkup([kb]) if kb else None,
+        )
 
     # ── captcha:<answer> ──────────────────────────────────────────────────────
     elif data.startswith("captcha:"):
@@ -153,28 +502,3 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("✅ Verified! You're all set.", show_alert=True)
         else:
             await query.answer("❌ Still not a member.", show_alert=True)
-
-    # ── search_more:<query>:<offset> ──────────────────────────────────────────
-    elif data.startswith("search_more:"):
-        parts         = data.split(":", 2)
-        q, offset     = parts[1], int(parts[2])
-        PAGE          = 5
-        users         = tg_users.search(q, limit=PAGE, offset=offset)
-        chats         = tg_chats.search(q, limit=PAGE, offset=offset)
-        if not users and not chats:
-            await query.answer("No more results.", show_alert=True)
-            return
-        page_num = offset // PAGE + 1
-        lines = [f"🔍 *Results for* `{escape(q)}` \\(page {page_num}\\)\n"]
-        for u in users: lines.append(user_line(u))
-        for c in chats: lines.append(chat_line(c))
-        kb = []
-        if offset > 0:
-            kb.append(InlineKeyboardButton("◀️ Prev", callback_data=f"search_more:{q}:{offset - PAGE}"))
-        if len(users) == PAGE or len(chats) == PAGE:
-            kb.append(InlineKeyboardButton("Next ▶️", callback_data=f"search_more:{q}:{offset + PAGE}"))
-        await query.edit_message_text(
-            "\n".join(lines),
-            parse_mode=ParseMode.MARKDOWN_V2,
-            reply_markup=InlineKeyboardMarkup([kb]) if kb else None,
-        )

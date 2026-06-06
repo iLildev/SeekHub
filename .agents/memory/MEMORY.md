@@ -1,0 +1,3 @@
+- [FunStat card format](funstat-card.md) — profile cards use FunStat-style layout with crystal-gated buttons, not flat text blocks
+- [Crystals system](crystals-system.md) — charge_query() in mirror/quota.py enforces daily limits; crystals spent via callbacks.py crystal_* handlers
+- [Profile view tracking](profile-views.md) — tg_profile_views table tracks who viewed whom; shown as "Were looking for: N" on cards

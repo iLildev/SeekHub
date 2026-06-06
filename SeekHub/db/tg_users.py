@@ -226,6 +226,106 @@ def count() -> int:
             return cur.fetchone()["cnt"]
 
 
+def get_extended_stats(user_id: int) -> dict:
+    """
+    All stats needed for the FunStat-style profile card — single DB round-trip.
+    Returns: total_messages, total_media, total_replies, total_forwards,
+             group_count, channel_count, first_message, last_message,
+             fav_group, admin_count, circles, voice
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    SUM(ucs.message_count)  AS total_messages,
+                    SUM(ucs.media_count)    AS total_media,
+                    SUM(ucs.reply_count)    AS total_replies,
+                    SUM(ucs.forward_count)  AS total_forwards,
+                    COUNT(DISTINCT ucs.chat_id) FILTER (
+                        WHERE c.type IN ('group','supergroup','gigagroup')
+                    ) AS group_count,
+                    COUNT(DISTINCT ucs.chat_id) FILTER (
+                        WHERE c.type = 'channel'
+                    ) AS channel_count,
+                    MIN(ucs.first_message_at) AS first_message,
+                    MAX(ucs.last_message_at)  AS last_message
+                FROM tg_user_chat_stats ucs
+                JOIN tg_chats c ON c.id = ucs.chat_id
+                WHERE ucs.user_id = %s
+            """, (user_id,))
+            stats = dict(cur.fetchone() or {})
+
+            cur.execute("""
+                SELECT c.title, c.username
+                FROM tg_user_chat_stats ucs
+                JOIN tg_chats c ON c.id = ucs.chat_id
+                WHERE ucs.user_id = %s
+                  AND c.type IN ('group','supergroup','gigagroup')
+                ORDER BY ucs.message_count DESC
+                LIMIT 1
+            """, (user_id,))
+            fav = cur.fetchone()
+            stats["fav_group"] = dict(fav) if fav else None
+
+            cur.execute("""
+                SELECT COUNT(*) AS cnt FROM tg_memberships
+                WHERE user_id = %s AND is_admin = TRUE
+            """, (user_id,))
+            stats["admin_count"] = (cur.fetchone() or {}).get("cnt", 0)
+
+            cur.execute("""
+                SELECT
+                    COUNT(*) FILTER (WHERE media_type = 'video_note') AS circles,
+                    COUNT(*) FILTER (WHERE media_type = 'voice')      AS voice
+                FROM tg_messages
+                WHERE sender_id = %s
+            """, (user_id,))
+            mv = cur.fetchone() or {}
+            stats["circles"] = mv.get("circles", 0) or 0
+            stats["voice"]   = mv.get("voice",   0) or 0
+
+    return stats
+
+
+def track_profile_view(viewer_id: int, target_id: int):
+    """Record that viewer looked at target's profile. Self-views are ignored."""
+    if viewer_id == target_id:
+        return
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO tg_profile_views (target_user_id, viewer_user_id) VALUES (%s,%s)",
+                (target_id, viewer_id)
+            )
+        conn.commit()
+
+
+def get_profile_view_count(user_id: int) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM tg_profile_views WHERE target_user_id = %s",
+                (user_id,)
+            )
+            return (cur.fetchone() or {}).get("cnt", 0)
+
+
+def get_user_channels(user_id: int, limit: int = 20):
+    """Channels (only) a user has been seen in."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT c.id, c.type, c.title, c.username,
+                       ucs.message_count, ucs.last_message_at
+                FROM tg_user_chat_stats ucs
+                JOIN tg_chats c ON c.id = ucs.chat_id
+                WHERE ucs.user_id = %s AND c.type = 'channel'
+                ORDER BY ucs.message_count DESC
+                LIMIT %s
+            """, (user_id, limit))
+            return cur.fetchall()
+
+
 def log_online(user_id: int, status: str):
     with get_conn() as conn:
         with conn.cursor() as cur:
