@@ -21,20 +21,21 @@ from db import init_db
 from db.sh_mirrors import get_all_active
 from runner import MirrorRunner
 
-from system.start        import cmd_start, WELCOME_TEXT
-from system.mirrors      import cmd_mirror
-from system.points       import cmd_points
-from system.aura         import cmd_aura, cmd_addaura
-from system.plan         import cmd_plan
-from system.admins       import cmd_stats, cmd_ban, cmd_unban
-from system.token_handler import cmd_token
-from system.captcha      import handle_captcha_callback
-from system.force_join   import handle_check_join_callback
-from system.hide         import (
+from system.start          import cmd_start, WELCOME_TEXT
+from system.mirrors        import cmd_mirror, cmd_mystats
+from system.points         import cmd_points
+from system.aura           import cmd_aura, cmd_addaura
+from system.plan           import cmd_plan, handle_plan_buy_callback
+from system.admins         import cmd_stats, cmd_ban, cmd_unban
+from system.token_handler  import cmd_token
+from system.captcha        import handle_captcha_callback
+from system.force_join     import handle_check_join_callback
+from system.hide           import (
     cmd_hide, handle_hide_buy_callback,
     handle_pre_checkout, handle_successful_payment,
 )
-from system.submit       import cmd_submit
+from system.submit         import cmd_submit
+from system.mirror_settings import cmd_mset, handle_mset_callback
 
 from services.statistics import get_stats_fmt
 from keyboards.system.main import main_keyboard, back_keyboard
@@ -159,23 +160,27 @@ def build_system_app(token: str, runner: MirrorRunner) -> Application:
     app = Application.builder().token(token).build()
     app.bot_data["mirror_runner"] = runner
 
-    app.add_handler(CommandHandler("start",   cmd_start))
-    app.add_handler(CommandHandler("mirror",  cmd_mirror))
-    app.add_handler(CommandHandler("token",   cmd_token))
-    app.add_handler(CommandHandler("points",  cmd_points))
-    app.add_handler(CommandHandler("aura",    cmd_aura))
-    app.add_handler(CommandHandler("addaura", cmd_addaura))
-    app.add_handler(CommandHandler("plan",    cmd_plan))
-    app.add_handler(CommandHandler("stats",   cmd_stats))
-    app.add_handler(CommandHandler("ban",     cmd_ban))
-    app.add_handler(CommandHandler("unban",   cmd_unban))
-    app.add_handler(CommandHandler("hide",    cmd_hide))
-    app.add_handler(CommandHandler("submit",  cmd_submit))
+    app.add_handler(CommandHandler("start",    cmd_start))
+    app.add_handler(CommandHandler("mirror",   cmd_mirror))
+    app.add_handler(CommandHandler("mystats",  cmd_mystats))
+    app.add_handler(CommandHandler("mset",     cmd_mset))
+    app.add_handler(CommandHandler("token",    cmd_token))
+    app.add_handler(CommandHandler("points",   cmd_points))
+    app.add_handler(CommandHandler("aura",     cmd_aura))
+    app.add_handler(CommandHandler("addaura",  cmd_addaura))
+    app.add_handler(CommandHandler("plan",     cmd_plan))
+    app.add_handler(CommandHandler("stats",    cmd_stats))
+    app.add_handler(CommandHandler("ban",      cmd_ban))
+    app.add_handler(CommandHandler("unban",    cmd_unban))
+    app.add_handler(CommandHandler("hide",     cmd_hide))
+    app.add_handler(CommandHandler("submit",   cmd_submit))
 
     app.add_handler(CallbackQueryHandler(handle_captcha_callback,    pattern=r"^captcha_"))
     app.add_handler(CallbackQueryHandler(handle_check_join_callback, pattern=r"^check_join$"))
     app.add_handler(CallbackQueryHandler(handle_menu_callback,       pattern=r"^menu_"))
     app.add_handler(CallbackQueryHandler(handle_hide_buy_callback,   pattern=r"^hide_buy:"))
+    app.add_handler(CallbackQueryHandler(handle_plan_buy_callback,   pattern=r"^plan_buy:"))
+    app.add_handler(CallbackQueryHandler(handle_mset_callback,       pattern=r"^mset:"))
 
     app.add_handler(PreCheckoutQueryHandler(handle_pre_checkout))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, handle_successful_payment))

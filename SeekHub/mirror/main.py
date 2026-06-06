@@ -2,9 +2,9 @@
 mirror/main.py
 ==============
 Builds the Application for a single mirror bot.
-All mirrors share the same handlers — differ only by token + mirror_id.
+All mirrors share the same handlers — differ only by token + mirror_id + settings.
 """
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, InlineQueryHandler
 
 from mirror.start      import cmd_start
 from mirror.profile    import cmd_profile
@@ -15,11 +15,30 @@ from mirror.analyze    import cmd_analyze, cmd_heatmap, cmd_export
 from mirror.phone      import cmd_phone
 from mirror.link       import cmd_link
 from mirror.callbacks  import handle_callback
+from mirror.inline     import handle_inline_query
 
 
-def build_mirror_app(token: str, mirror_id: int) -> Application:
+def _guarded(handler_func, setting_key: str):
+    """
+    Wraps a command handler so it can be disabled per-mirror via settings.
+    The mirror owner sets settings[setting_key] = False to disable the command.
+    """
+    async def wrapper(update, context):
+        settings = context.bot_data.get("settings") or {}
+        if not settings.get(setting_key, True):
+            await update.message.reply_text(
+                "🚫 This command is disabled on this mirror\\.",
+                parse_mode="MarkdownV2",
+            )
+            return
+        return await handler_func(update, context)
+    return wrapper
+
+
+def build_mirror_app(token: str, mirror_id: int, settings: dict | None = None) -> Application:
     app = Application.builder().token(token).build()
     app.bot_data["mirror_id"] = mirror_id
+    app.bot_data["settings"]  = settings or {}
 
     # ── Search & lookup ──────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",   cmd_start))
@@ -27,9 +46,9 @@ def build_mirror_app(token: str, mirror_id: int) -> Application:
     app.add_handler(CommandHandler("id",      cmd_id))
     app.add_handler(CommandHandler("user",    cmd_user))
     app.add_handler(CommandHandler("group",   cmd_group))
-    app.add_handler(CommandHandler("msearch", cmd_msearch))
-    app.add_handler(CommandHandler("near",    cmd_near))
-    app.add_handler(CommandHandler("phone",   cmd_phone))
+    app.add_handler(CommandHandler("msearch", _guarded(cmd_msearch, "msearch_enabled")))
+    app.add_handler(CommandHandler("near",    _guarded(cmd_near,    "near_enabled")))
+    app.add_handler(CommandHandler("phone",   _guarded(cmd_phone,   "phone_enabled")))
 
     # ── Profile & referrals ──────────────────────────────────────────────────
     app.add_handler(CommandHandler("profile", cmd_profile))
@@ -41,9 +60,12 @@ def build_mirror_app(token: str, mirror_id: int) -> Application:
     app.add_handler(CommandHandler("tracks",  cmd_tracks))
 
     # ── Analysis & export ────────────────────────────────────────────────────
-    app.add_handler(CommandHandler("analyze", cmd_analyze))
-    app.add_handler(CommandHandler("heatmap", cmd_heatmap))
-    app.add_handler(CommandHandler("export",  cmd_export))
+    app.add_handler(CommandHandler("analyze", _guarded(cmd_analyze, "analyze_enabled")))
+    app.add_handler(CommandHandler("heatmap", _guarded(cmd_heatmap, "analyze_enabled")))
+    app.add_handler(CommandHandler("export",  _guarded(cmd_export,  "export_enabled")))
+
+    # ── Inline query (type @bot <query> from any chat) ───────────────────────
+    app.add_handler(InlineQueryHandler(handle_inline_query))
 
     # ── Callbacks ────────────────────────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(handle_callback))

@@ -339,8 +339,22 @@ CREATE TABLE IF NOT EXISTS sh_mirrors (
     is_active       BOOLEAN DEFAULT TRUE,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     query_count     BIGINT DEFAULT 0,           -- total queries served
-    user_count      INT DEFAULT 0              -- users who used this mirror
+    user_count      INT DEFAULT 0,              -- users who used this mirror
+    settings        JSONB DEFAULT '{}'::jsonb   -- owner-controlled toggles
 );
+
+ALTER TABLE sh_mirrors ADD COLUMN IF NOT EXISTS settings JSONB DEFAULT '{}'::jsonb;
+
+-- Search query log for top-queries analytics
+CREATE TABLE IF NOT EXISTS sh_mirror_queries (
+    id          BIGSERIAL PRIMARY KEY,
+    mirror_id   INT NOT NULL REFERENCES sh_mirrors(id) ON DELETE CASCADE,
+    query_text  TEXT NOT NULL,
+    queried_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_mirror_queries_mirror ON sh_mirror_queries(mirror_id);
+CREATE INDEX IF NOT EXISTS idx_mirror_queries_time   ON sh_mirror_queries(queried_at);
 
 CREATE INDEX IF NOT EXISTS idx_sh_mirrors_owner  ON sh_mirrors(owner_id);
 CREATE INDEX IF NOT EXISTS idx_sh_mirrors_bot_id ON sh_mirrors(bot_id);
