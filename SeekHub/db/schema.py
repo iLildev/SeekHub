@@ -430,6 +430,102 @@ VALUES
     (3, 'Pro',     500,  30, 100, 3, 10, TRUE,  FALSE, '{"badge": "🔷"}'::jsonb),
     (4, 'Elite',   1500, 30, 999, 10,50, TRUE,  TRUE,  '{"badge": "💠"}'::jsonb)
 ON CONFLICT (id) DO NOTHING;
+
+-- ─────────────────────────────────────────────
+--  PRIVACY: Hide plans & subscriptions
+-- ─────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS sh_hide_plans (
+    id            SERIAL PRIMARY KEY,
+    name          TEXT NOT NULL,
+    price_stars   INT  NOT NULL,
+    duration_days INT  NOT NULL DEFAULT 30,
+    features      JSONB DEFAULT '{}'::jsonb
+);
+
+INSERT INTO sh_hide_plans (id, name, price_stars, duration_days, features) VALUES
+    (1, 'Ghost',  250, 30, '{"hide_username": true, "hide_all": false, "see_searchers": false, "badge": "👻", "price_display": "$4.99"}'::jsonb),
+    (2, 'Shadow', 400, 30, '{"hide_username": true, "hide_all": true,  "see_searchers": false, "badge": "🌑", "price_display": "$7.99"}'::jsonb),
+    (3, 'Spy',    750, 30, '{"hide_username": true, "hide_all": true,  "see_searchers": true,  "badge": "🕵️", "price_display": "$14.99"}'::jsonb)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS sh_hide_subscriptions (
+    id          SERIAL PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES sh_users(id),
+    plan_id     INT    NOT NULL REFERENCES sh_hide_plans(id),
+    starts_at   TIMESTAMPTZ DEFAULT NOW(),
+    expires_at  TIMESTAMPTZ NOT NULL,
+    is_active   BOOLEAN DEFAULT TRUE,
+    payment_id  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_hide_subs_user   ON sh_hide_subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_hide_subs_active ON sh_hide_subscriptions(is_active, expires_at);
+
+-- ─────────────────────────────────────────────
+--  PAYMENTS: Telegram Stars transactions
+-- ─────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS sh_star_payments (
+    id                           SERIAL PRIMARY KEY,
+    user_id                      BIGINT NOT NULL REFERENCES sh_users(id),
+    telegram_payment_charge_id   TEXT UNIQUE,
+    stars_amount                 INT  NOT NULL,
+    purpose                      TEXT NOT NULL,
+    payload                      TEXT,
+    created_at                   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_star_payments_user ON sh_star_payments(user_id);
+
+-- ─────────────────────────────────────────────
+--  SUBMISSIONS: User-submitted group links
+-- ─────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS sh_group_submissions (
+    id               SERIAL PRIMARY KEY,
+    user_id          BIGINT NOT NULL REFERENCES sh_users(id),
+    chat_id          BIGINT,
+    username         TEXT,
+    submitted_at     TIMESTAMPTZ DEFAULT NOW(),
+    status           TEXT DEFAULT 'pending',
+    crystals_awarded BOOLEAN DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_submissions_user ON sh_group_submissions(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_group_submissions_chat
+    ON sh_group_submissions(chat_id) WHERE chat_id IS NOT NULL AND status != 'rejected';
+
+-- ─────────────────────────────────────────────
+--  CHANNEL ANALYTICS: Channels tracked for owners
+-- ─────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS sh_channel_analytics (
+    channel_id    BIGINT PRIMARY KEY REFERENCES tg_chats(id) ON DELETE CASCADE,
+    owner_user_id BIGINT NOT NULL REFERENCES sh_users(id),
+    notifications JSONB  DEFAULT '{"member_join": true, "member_leave": true}'::jsonb,
+    added_at      TIMESTAMPTZ DEFAULT NOW(),
+    is_active     BOOLEAN DEFAULT TRUE
+);
+
+CREATE INDEX IF NOT EXISTS idx_channel_analytics_owner ON sh_channel_analytics(owner_user_id);
+
+-- ─────────────────────────────────────────────
+--  ANALYTICS EVENTS: Notification delivery queue
+-- ─────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS sh_analytics_events (
+    id                BIGSERIAL PRIMARY KEY,
+    recipient_user_id BIGINT NOT NULL,
+    event_type        TEXT   NOT NULL,
+    payload           JSONB  DEFAULT '{}'::jsonb,
+    delivered         BOOLEAN DEFAULT FALSE,
+    delivered_at      TIMESTAMPTZ,
+    created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_events_pending
+    ON sh_analytics_events(delivered, created_at) WHERE delivered = FALSE;
 """
 
 

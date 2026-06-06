@@ -12,7 +12,10 @@ import logging
 import os
 import sys
 
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler,
+    MessageHandler, PreCheckoutQueryHandler, filters,
+)
 
 from db import init_db
 from db.sh_mirrors import get_all_active
@@ -27,6 +30,11 @@ from system.admins       import cmd_stats, cmd_ban, cmd_unban
 from system.token_handler import cmd_token
 from system.captcha      import handle_captcha_callback
 from system.force_join   import handle_check_join_callback
+from system.hide         import (
+    cmd_hide, handle_hide_buy_callback,
+    handle_pre_checkout, handle_successful_payment,
+)
+from system.submit       import cmd_submit
 
 from services.statistics import get_stats_fmt
 from keyboards.system.main import main_keyboard, back_keyboard
@@ -81,7 +89,11 @@ async def handle_menu_callback(update, context):
         refs = ref_count(uid)
         text = (
             f"*💎 Crystals*\n\nBalance: `{bal}`\nReferrals: `{refs}`\n\n"
-            f"Referral link:\n`https://t\\.me/SeekHubBot?start={uid}`"
+            f"Referral link:\n`https://t\\.me/SeekHubBot?start={uid}`\n\n"
+            f"*Earn crystals:*\n"
+            f"• Share your referral link — *\\+10 crystals* per new user\n"
+            f"• New users get *\\+4 crystals* on join\n"
+            f"• Submit a new group via /submit — *\\+8 crystals*"
         )
         await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=back_keyboard())
 
@@ -112,15 +124,39 @@ async def handle_menu_callback(update, context):
             )
         await query.edit_message_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=back_keyboard())
 
+    elif data == "menu_hide":
+        from db import sh_hide_plans
+        active = sh_hide_plans.get_active_subscription(uid)
+        plans  = sh_hide_plans.get_all()
+        lines  = ["*🛡️ Privacy Plans*\n",
+                  "Hide yourself from SeekHub search results\\. Paid monthly via Telegram Stars\\.\n"]
+        badges = {"ghost": "👻", "shadow": "🌑", "spy": "🕵️"}
+        for p in plans:
+            feat  = p["features"] or {}
+            badge = feat.get("badge", "•")
+            price = feat.get("price_display", f"⭐{p['price_stars']}")
+            lines.append(f"{badge} *{escape(p['name'])}* — {escape(price)}")
+        if active:
+            exp   = active["expires_at"].strftime("%Y\\-%m\\-%d")
+            pname = escape(active.get("plan_name", ""))
+            lines.append(f"\n✅ Active: *{pname}* \\(expires {exp}\\)")
+        lines.append("\nUse /hide to purchase a plan\\.")
+        await query.edit_message_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=back_keyboard())
+
+    elif data == "menu_submit":
+        text = (
+            "*📢 Submit a Group*\n\n"
+            "Help grow the SeekHub database and earn *8 crystals* "
+            "for every new public group or channel you submit\\.\n\n"
+            "Use /submit to get started\\."
+        )
+        await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=back_keyboard())
+
 
 # ── System bot builder ────────────────────────────────────────────────────────
 
 def build_system_app(token: str, runner: MirrorRunner) -> Application:
-    app = (
-        Application.builder()
-        .token(token)
-        .build()
-    )
+    app = Application.builder().token(token).build()
     app.bot_data["mirror_runner"] = runner
 
     app.add_handler(CommandHandler("start",   cmd_start))
@@ -133,10 +169,16 @@ def build_system_app(token: str, runner: MirrorRunner) -> Application:
     app.add_handler(CommandHandler("stats",   cmd_stats))
     app.add_handler(CommandHandler("ban",     cmd_ban))
     app.add_handler(CommandHandler("unban",   cmd_unban))
+    app.add_handler(CommandHandler("hide",    cmd_hide))
+    app.add_handler(CommandHandler("submit",  cmd_submit))
 
     app.add_handler(CallbackQueryHandler(handle_captcha_callback,    pattern=r"^captcha_"))
     app.add_handler(CallbackQueryHandler(handle_check_join_callback, pattern=r"^check_join$"))
     app.add_handler(CallbackQueryHandler(handle_menu_callback,       pattern=r"^menu_"))
+    app.add_handler(CallbackQueryHandler(handle_hide_buy_callback,   pattern=r"^hide_buy:"))
+
+    app.add_handler(PreCheckoutQueryHandler(handle_pre_checkout))
+    app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, handle_successful_payment))
 
     return app
 
@@ -161,7 +203,6 @@ async def start_userbot(system_app: Application) -> object | None:
     me = await client.get_me()
     logger.info("Userbot connected: @%s (id=%s)", me.username, me.id)
 
-    # Share client with system bot (for token handler, tracking, etc.)
     system_app.bot_data["userbot_client"] = client
     return client
 
@@ -173,17 +214,14 @@ def register_scheduled_tasks(system_app: Application):
     if not jq:
         return
 
-    from tasks.online_tracker import run_online_tracker, run_name_tracker
+    from tasks.online_tracker  import run_online_tracker, run_name_tracker
+    from tasks.deliver_events  import deliver_analytics_events
 
-    # Online status check every 5 minutes
-    jq.run_repeating(run_online_tracker, interval=300, first=60,
-                     name="online_tracker")
+    jq.run_repeating(run_online_tracker,        interval=300,  first=60,  name="online_tracker")
+    jq.run_repeating(run_name_tracker,          interval=3600, first=120, name="name_tracker")
+    jq.run_repeating(deliver_analytics_events,  interval=30,   first=15,  name="deliver_events")
 
-    # Name/bio/photo change check every hour
-    jq.run_repeating(run_name_tracker, interval=3600, first=120,
-                     name="name_tracker")
-
-    logger.info("Scheduled tasks registered: online_tracker (5m), name_tracker (1h)")
+    logger.info("Scheduled tasks registered: online_tracker(5m), name_tracker(1h), deliver_events(30s)")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -198,23 +236,20 @@ async def main():
     init_db()
     logger.info("Database ready")
 
-    # Mirror runner — userbot will be attached after it starts
-    runner = MirrorRunner()
+    runner     = MirrorRunner()
     active_mirrors = get_all_active()
     logger.info("Found %d active mirror(s)", len(active_mirrors))
 
-    # System bot
     system_app = build_system_app(bot_token, runner)
     register_scheduled_tasks(system_app)
 
     await system_app.initialize()
     await system_app.start()
     await system_app.updater.start_polling(
-        allowed_updates=["message", "callback_query"],
+        allowed_updates=["message", "callback_query", "pre_checkout_query"],
     )
     logger.info("System bot started")
 
-    # Collector bot (Bot API, optional)
     collector_app = None
     from collector.bot import build_collector_app
     collector_app = build_collector_app()
@@ -230,13 +265,10 @@ async def main():
         )
         logger.info("Collector bot started")
 
-    # Userbot (MTProto, optional but powerful) — start BEFORE mirrors so they get the client
     userbot_client = await start_userbot(system_app)
 
-    # Now start mirrors — pass userbot so /near, /track, /user can use MTProto
     await runner.start_all(active_mirrors, userbot_client=userbot_client)
 
-    # Also attach to already-running mirrors (if any were loaded before userbot started)
     if userbot_client:
         runner.attach_userbot(userbot_client)
 
@@ -248,7 +280,6 @@ async def main():
         "✅" if userbot_client else "⚠️ (run gen_session.py)",
     )
 
-    # Run forever
     try:
         while True:
             await asyncio.sleep(3600)

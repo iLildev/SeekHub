@@ -9,7 +9,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
-from db import tg_users, tg_chats, tg_messages
+from db import tg_users, tg_chats, tg_messages, sh_hide_plans
 from db.sh_mirrors import increment_query_count, track_mirror_user
 from utils.fmt import user_line, chat_line, escape
 
@@ -57,7 +57,7 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.startswith("@") or (len(query) > 3 and "_" not in query and " " not in query):
         user = tg_users.get_by_username(query)
         if user:
-            await _send_user_result(update, user)
+            await _send_user_result(update, user, searcher_id=update.effective_user.id)
             return
 
     # Full-text search — users + chats combined
@@ -123,7 +123,7 @@ async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = tg_users.get(entity_id)
     if user:
-        await _send_user_result(update, user, full=True)
+        await _send_user_result(update, user, full=True, searcher_id=update.effective_user.id)
         return
 
     chat = tg_chats.get(entity_id)
@@ -181,7 +181,7 @@ async def cmd_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    await _send_user_result(update, user, full=True)
+    await _send_user_result(update, user, full=True, searcher_id=update.effective_user.id)
 
 
 # ── /group ────────────────────────────────────────────────────────────────────
@@ -265,10 +265,38 @@ async def cmd_msearch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── Formatters ────────────────────────────────────────────────────────────────
 
-async def _send_user_result(update: Update, user: dict, full: bool = False):
-    uid   = user["id"]
+def _check_hide(user_id: int, searcher_id: int) -> str | None:
+    """
+    Returns 'shadow' (skip entirely), 'ghost' (mask username), or None (show normally).
+    Also queues a spy_alert if the user has the Spy plan.
+    """
+    sub = sh_hide_plans.get_active_subscription(user_id)
+    if not sub:
+        return None
+    feat = sub.get("plan_features") or {}
+    if feat.get("see_searchers") and searcher_id != user_id:
+        from db.sh_hide_plans import notify_searcher
+        notify_searcher(user_id, searcher_id)
+    if feat.get("hide_all"):
+        return "shadow"
+    if feat.get("hide_username"):
+        return "ghost"
+    return None
+
+
+async def _send_user_result(update: Update, user: dict, full: bool = False,
+                            searcher_id: int | None = None):
+    uid        = user["id"]
+    hide_level = _check_hide(uid, searcher_id or 0)
+    if hide_level == "shadow":
+        return
+
     name  = escape(" ".join(filter(None, [user.get("first_name"), user.get("last_name")])) or "Unknown")
-    uname = f"@{escape(user['username'])}" if user.get("username") else "_no username_"
+    uname = (
+        "🔒 _hidden_"
+        if hide_level == "ghost"
+        else (f"@{escape(user['username'])}" if user.get("username") else "_no username_")
+    )
 
     lines = [
         f"👤 *{name}*",
