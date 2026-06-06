@@ -88,17 +88,29 @@ def track_mirror_user(mirror_id: int, user_id: int, username: str = None, first_
         conn.commit()
 
 
-def log_query(mirror_id: int, query_text: str):
+def log_query(mirror_id: int, query_text: str, user_id: int = None):
     """Record a search query for top-queries analytics."""
     if not query_text or not query_text.strip():
         return
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO sh_mirror_queries (mirror_id, query_text) VALUES (%s, %s)",
-                (mirror_id, query_text.strip()[:100])
+                "INSERT INTO sh_mirror_queries (mirror_id, query_text, user_id) VALUES (%s, %s, %s)",
+                (mirror_id, query_text.strip()[:100], user_id)
             )
         conn.commit()
+
+
+def get_user_daily_count(mirror_id: int, user_id: int) -> int:
+    """Count how many queries a user has made on this mirror today."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) AS cnt FROM sh_mirror_queries
+                WHERE mirror_id = %s AND user_id = %s
+                  AND queried_at >= CURRENT_DATE
+            """, (mirror_id, user_id))
+            return cur.fetchone()["cnt"]
 
 
 def get_settings(mirror_id: int) -> dict:

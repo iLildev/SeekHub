@@ -540,6 +540,14 @@ CREATE TABLE IF NOT EXISTS sh_analytics_events (
 
 CREATE INDEX IF NOT EXISTS idx_analytics_events_pending
     ON sh_analytics_events(delivered, created_at) WHERE delivered = FALSE;
+
+-- ─────────────────────────────────────────────
+--  QUERY QUOTA: Per-user daily usage tracking
+-- ─────────────────────────────────────────────
+
+ALTER TABLE sh_mirror_queries ADD COLUMN IF NOT EXISTS user_id BIGINT;
+CREATE INDEX IF NOT EXISTS idx_mirror_queries_user_date
+    ON sh_mirror_queries(user_id, queried_at) WHERE user_id IS NOT NULL;
 """
 
 

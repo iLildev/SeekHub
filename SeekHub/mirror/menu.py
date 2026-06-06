@@ -12,6 +12,7 @@ from telegram.constants import ParseMode
 
 from db import tg_users, tg_chats, sh_hide_plans
 from db.sh_mirrors import increment_query_count, track_mirror_user, log_query
+from mirror.quota import charge_query
 from utils.fmt import escape, user_line, chat_line
 from keyboards.mirror.main import (
     main_keyboard, select_keyboard,
@@ -57,9 +58,10 @@ async def handle_users_shared(update: Update, context: ContextTypes.DEFAULT_TYPE
     user      = update.effective_user
     bots_only = (req_id == REQ_BOT)
 
-    track_mirror_user(mirror_id, user.id,
-                      username=user.username, first_name=user.first_name)
-    increment_query_count(mirror_id)
+    # charge_query handles tracking + quota + crystal deduction
+    allowed = await charge_query(update, context, mirror_id)
+    if not allowed:
+        return
 
     # shared.users is a list of SharedUser objects
     for shared_user in shared.users:
@@ -102,9 +104,10 @@ async def handle_chat_shared(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user      = update.effective_user
     chat_type = "channel" if req_id == REQ_CHANNEL else "group"
 
-    track_mirror_user(mirror_id, user.id,
-                      username=user.username, first_name=user.first_name)
-    increment_query_count(mirror_id)
+    # charge_query handles tracking + quota + crystal deduction
+    allowed = await charge_query(update, context, mirror_id)
+    if not allowed:
+        return
 
     cid = shared.chat_id
     log_query(mirror_id, str(cid))
@@ -194,11 +197,10 @@ async def handle_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_numeric  = text.lstrip("-").isdigit() and len(text) >= 5
 
     if is_username or is_numeric:
-        track_mirror_user(mirror_id, user.id,
-                          username=user.username, first_name=user.first_name)
-        increment_query_count(mirror_id)
-        log_query(mirror_id, text)
         context.user_data.pop("awaiting", None)
+        allowed = await charge_query(update, context, mirror_id, text)
+        if not allowed:
+            return
         await _do_direct_lookup(update, text, user.id)
         return
 
@@ -206,10 +208,9 @@ async def handle_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     awaiting = context.user_data.get("awaiting")
     if awaiting and text:
         context.user_data.pop("awaiting", None)
-        track_mirror_user(mirror_id, user.id,
-                          username=user.username, first_name=user.first_name)
-        increment_query_count(mirror_id)
-        log_query(mirror_id, text)
+        allowed = await charge_query(update, context, mirror_id, text)
+        if not allowed:
+            return
         await _do_search(update, text, user.id)
 
 

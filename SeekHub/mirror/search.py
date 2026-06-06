@@ -1,8 +1,9 @@
 """
 mirror/search.py
 ================
-The core query interface exposed to end-users via mirror bots.
-Every query here hits the central SeekHub DB.
+Core query interface for mirror bots.
+All searches hit the central SeekHub DB and go through charge_query()
+which enforces daily limits and crystal-based bypass.
 """
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -10,59 +11,41 @@ from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
 from db import tg_users, tg_chats, tg_messages, sh_hide_plans
-from db.sh_mirrors import increment_query_count, track_mirror_user
+from db.connection import get_conn
+from mirror.quota import charge_query
 from utils.fmt import user_line, chat_line, escape
 
 logger = logging.getLogger(__name__)
 
 
-async def _charge_query(context: ContextTypes.DEFAULT_TYPE, user, mirror_id: int) -> bool:
-    """
-    Track the query and ensure the user is registered.
-    Returns True if the query is allowed.
-    """
-    track_mirror_user(
-        mirror_id,
-        user.id,
-        username=user.username,
-        first_name=user.first_name,
-    )
-    increment_query_count(mirror_id)
-    return True
-
-
 # ── /search ───────────────────────────────────────────────────────────────────
 
 async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /search <query>
-    Search for users AND chats matching the query.
-    """
+    """/search <query> — search users AND chats."""
     if not context.args:
         await update.message.reply_text(
-            "🔍 *Search the SeekHub database*\n\n"
-            "Usage:\n"
-            "`/search @username` — find a user\n"
-            "`/search GroupName` — find groups/channels\n"
-            "`/id 123456789` — look up by Telegram ID",
+            "🔍 *Search SeekHub*\n\n"
+            "• `/search @username` — find a user\n"
+            "• `/search GroupName` — find groups/channels\n"
+            "• `/id 123456789` — lookup by Telegram ID",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
 
     query     = " ".join(context.args).strip()
     mirror_id = context.bot_data.get("mirror_id", 0)
-    await _charge_query(context, update.effective_user, mirror_id)
+    allowed   = await charge_query(update, context, mirror_id, query)
+    if not allowed:
+        return
 
-    # Username lookup — exact match first
     if query.startswith("@") or (len(query) > 3 and "_" not in query and " " not in query):
         user = tg_users.get_by_username(query)
         if user:
             await _send_user_result(update, user, searcher_id=update.effective_user.id)
             return
 
-    # Full-text search — users + chats combined
-    users  = tg_users.search(query, limit=5)
-    chats  = tg_chats.search(query, limit=5)
+    users = tg_users.search(query, limit=5)
+    chats = tg_chats.search(query, limit=5)
 
     if not users and not chats:
         await update.message.reply_text(
@@ -73,12 +56,10 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     lines = [f"🔍 *Results for* `{escape(query)}`\n"]
-
     if users:
         lines.append("*👤 Users*")
         for u in users:
             lines.append(user_line(u))
-
     if chats:
         lines.append("\n*💬 Groups & Channels*")
         for c in chats:
@@ -87,7 +68,6 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("🔍 More results", callback_data=f"search_more:{query}:0"),
     ]])
-
     await update.message.reply_text(
         "\n".join(lines),
         parse_mode=ParseMode.MARKDOWN_V2,
@@ -98,14 +78,10 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── /id ───────────────────────────────────────────────────────────────────────
 
 async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /id <telegram_id>
-    Look up any Telegram entity by numeric ID.
-    """
+    """/id <telegram_id> — look up any entity by numeric ID."""
     if not context.args:
         await update.message.reply_text(
-            "Usage: `/id 123456789`",
-            parse_mode=ParseMode.MARKDOWN_V2,
+            "Usage: `/id 123456789`", parse_mode=ParseMode.MARKDOWN_V2
         )
         return
 
@@ -113,13 +89,14 @@ async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         entity_id = int(context.args[0])
     except ValueError:
         await update.message.reply_text(
-            "❌ ID must be a number\\.",
-            parse_mode=ParseMode.MARKDOWN_V2,
+            "❌ ID must be a number\\.", parse_mode=ParseMode.MARKDOWN_V2
         )
         return
 
     mirror_id = context.bot_data.get("mirror_id", 0)
-    await _charge_query(context, update.effective_user, mirror_id)
+    allowed   = await charge_query(update, context, mirror_id, str(entity_id))
+    if not allowed:
+        return
 
     user = tg_users.get(entity_id)
     if user:
@@ -140,10 +117,7 @@ async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── /user ─────────────────────────────────────────────────────────────────────
 
 async def cmd_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /user @username  or  /user <id>
-    Full profile: name history, username history, groups, message stats.
-    """
+    """/user @username or /user <id> — full user profile."""
     if not context.args:
         await update.message.reply_text(
             "Usage: `/user @username` or `/user 123456789`",
@@ -153,7 +127,9 @@ async def cmd_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     arg       = context.args[0]
     mirror_id = context.bot_data.get("mirror_id", 0)
-    await _charge_query(context, update.effective_user, mirror_id)
+    allowed   = await charge_query(update, context, mirror_id, arg)
+    if not allowed:
+        return
 
     user = None
     try:
@@ -162,7 +138,6 @@ async def cmd_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = tg_users.get_by_username(arg)
 
     if not user:
-        # Try to resolve via userbot if available
         userbot = context.bot_data.get("userbot_client")
         if userbot and userbot.is_connected:
             try:
@@ -187,10 +162,7 @@ async def cmd_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── /group ────────────────────────────────────────────────────────────────────
 
 async def cmd_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /group @username  or  /group <id>
-    Full group/channel profile: member count, top posters, history.
-    """
+    """/group @username or /group <id> — full group/channel profile."""
     if not context.args:
         await update.message.reply_text(
             "Usage: `/group @groupname` or `/group 123456789`",
@@ -200,7 +172,9 @@ async def cmd_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     arg       = context.args[0]
     mirror_id = context.bot_data.get("mirror_id", 0)
-    await _charge_query(context, update.effective_user, mirror_id)
+    allowed   = await charge_query(update, context, mirror_id, arg)
+    if not allowed:
+        return
 
     chat = None
     try:
@@ -221,20 +195,18 @@ async def cmd_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── /msearch ──────────────────────────────────────────────────────────────────
 
 async def cmd_msearch(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /msearch <keyword>
-    Full-text search inside indexed messages.
-    """
+    """/msearch <keyword> — full-text search inside indexed messages."""
     if not context.args:
         await update.message.reply_text(
-            "Usage: `/msearch keyword` — search indexed messages",
-            parse_mode=ParseMode.MARKDOWN_V2,
+            "Usage: `/msearch keyword`", parse_mode=ParseMode.MARKDOWN_V2
         )
         return
 
     query     = " ".join(context.args).strip()
     mirror_id = context.bot_data.get("mirror_id", 0)
-    await _charge_query(context, update.effective_user, mirror_id)
+    allowed   = await charge_query(update, context, mirror_id, query)
+    if not allowed:
+        return
 
     results = tg_messages.search_text(query, limit=10)
 
@@ -263,13 +235,10 @@ async def cmd_msearch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ── Formatters ────────────────────────────────────────────────────────────────
+# ── Privacy / Hide layer ──────────────────────────────────────────────────────
 
 def _check_hide(user_id: int, searcher_id: int) -> str | None:
-    """
-    Returns 'shadow' (skip entirely), 'ghost' (mask username), or None (show normally).
-    Also queues a spy_alert if the user has the Spy plan.
-    """
+    """Returns 'shadow', 'ghost', or None."""
     sub = sh_hide_plans.get_active_subscription(user_id)
     if not sub:
         return None
@@ -283,6 +252,18 @@ def _check_hide(user_id: int, searcher_id: int) -> str | None:
         return "ghost"
     return None
 
+
+def _get_photo_count(user_id: int) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM tg_photo_history WHERE user_id = %s",
+                (user_id,)
+            )
+            return cur.fetchone()["cnt"]
+
+
+# ── User result card ──────────────────────────────────────────────────────────
 
 async def _send_user_result(update: Update, user: dict, full: bool = False,
                             searcher_id: int | None = None):
@@ -298,68 +279,89 @@ async def _send_user_result(update: Update, user: dict, full: bool = False,
         else (f"@{escape(user['username'])}" if user.get("username") else "_no username_")
     )
 
-    lines = [
-        f"👤 *{name}*",
-        f"ID: `{uid}`",
-        f"Username: {uname}",
-    ]
+    badges = []
+    if user.get("is_premium"):  badges.append("💎 Premium")
+    if user.get("is_verified"): badges.append("✅ Verified")
+    if user.get("is_deleted"):  badges.append("🗑 Deleted")
+    if user.get("is_bot"):      badges.append("🤖 Bot")
 
-    if user.get("is_premium"):  lines.append("💎 Premium")
-    if user.get("is_verified"): lines.append("✅ Verified")
-    if user.get("is_deleted"):  lines.append("🗑 Deleted account")
-    if user.get("is_bot"):      lines.append("🤖 Bot")
+    lines = [f"👤 *{name}*"]
+    lines.append(f"• ID: `{uid}`")
+    lines.append(f"• Username: {uname}")
+    if badges:
+        badge_str = " | ".join(badges)
+        lines.append(f"• {badge_str}")
 
     if full:
-        # Username history
-        history = tg_users.get_username_history(uid)
-        if len(history) > 1:
-            old = [f"`@{escape(h['username'])}`" for h in history[1:5]]
-            lines.append(f"\n🔄 *Previous usernames:* {', '.join(old)}")
+        lines.append("")
 
-        # Name history
+        # ── History section ────────────────────────────────────────────────────
+        hist_lines = []
+
+        username_hist = tg_users.get_username_history(uid)
+        if len(username_hist) > 1:
+            old = [f"`@{escape(h['username'])}`" for h in username_hist[1:5]]
+            hist_lines.append(f"• 🔄 Old usernames: {', '.join(old)}")
+
         name_hist = tg_users.get_name_history(uid)
         if len(name_hist) > 1:
             old_names = [
                 escape(" ".join(filter(None, [h["first_name"], h["last_name"]])))
                 for h in name_hist[1:4]
             ]
-            lines.append(f"📝 *Previous names:* {', '.join(old_names)}")
+            hist_lines.append(f"• 📝 Old names: {', '.join(old_names)}")
 
-        # Bio
-        if user.get("bio"):
-            lines.append(f"\n📋 *Bio:* {escape(user['bio'][:200])}")
+        bio_hist = tg_users.get_bio_history(uid)
+        if bio_hist:
+            bio_text = escape(bio_hist[0]["bio"][:150]) if bio_hist[0].get("bio") else "_empty_"
+            hist_lines.append(f"• 📋 Bio: _{bio_text}_")
+            if len(bio_hist) > 1:
+                hist_lines.append(f"• 🔁 Bio changed `{len(bio_hist) - 1}`× before")
+        elif user.get("bio"):
+            hist_lines.append(f"• 📋 Bio: _{escape(user['bio'][:150])}_")
 
-        # Message stats
+        photo_count = _get_photo_count(uid)
+        if photo_count > 0:
+            hist_lines.append(f"• 🖼 Profile photos: `{photo_count}` recorded")
+
+        if hist_lines:
+            lines.append("📜 *History*")
+            lines.extend(hist_lines)
+            lines.append("")
+
+        # ── Activity section ───────────────────────────────────────────────────
         stats = tg_users.get_message_stats(uid)
         if stats and stats["total_messages"]:
-            lines.append(
-                f"\n📊 *Activity*\n"
-                f"Messages: `{stats['total_messages']}`  \\|  "
-                f"Media: `{stats['total_media']}`  \\|  "
-                f"Chats: `{stats['chat_count']}`"
-            )
-            if stats["first_seen"]:
+            lines.append("📊 *Activity*")
+            lines.append(f"• 💬 Messages: `{stats['total_messages']}` \\| 📸 Media: `{stats['total_media']}`")
+            lines.append(f"• 🗂 Active in `{stats['chat_count']}` chats")
+            if stats.get("first_seen"):
                 date_str = stats["first_seen"].strftime("%Y\\-%m\\-%d")
-                lines.append(f"First seen: `{date_str}`")
+                lines.append(f"• 📅 First seen: `{date_str}`")
+            if stats.get("last_seen"):
+                date_str = stats["last_seen"].strftime("%Y\\-%m\\-%d")
+                lines.append(f"• 🕐 Last active: `{date_str}`")
+            lines.append("")
 
-        # Groups
-        groups = tg_users.get_chats(uid, limit=8)
+        # ── Groups section ─────────────────────────────────────────────────────
+        groups = tg_users.get_chats(uid, limit=10)
         if groups:
             glist = []
             for g in groups:
-                gref = f"@{g['username']}" if g.get("username") else g["title"] or str(g["id"])
+                gref = f"@{g['username']}" if g.get("username") else (g.get("title") or str(g["id"]))
                 glist.append(f"`{escape(gref)}`")
-            lines.append(f"\n💬 *Seen in:* {', '.join(glist)}")
+            lines.append(f"💬 *Seen in \\({len(groups)}\\)*")
+            lines.append("• " + ", ".join(glist))
 
     buttons = []
     if full:
         buttons.append([
-            InlineKeyboardButton("🤝 Mutual Groups", callback_data=f"mutual:{uid}"),
-            InlineKeyboardButton("💬 Messages",      callback_data=f"user_msgs:{uid}:0"),
+            InlineKeyboardButton("🤝 Mutual", callback_data=f"mutual:{uid}"),
+            InlineKeyboardButton("💬 Messages", callback_data=f"user_msgs:{uid}:0"),
         ])
         buttons.append([
-            InlineKeyboardButton("🔗 Interactions",  callback_data=f"interactions:{uid}"),
-            InlineKeyboardButton("📍 Near Users",    callback_data=f"near:{uid}"),
+            InlineKeyboardButton("🔗 Interactions", callback_data=f"interactions:{uid}"),
+            InlineKeyboardButton("📍 Near Users", callback_data=f"near:{uid}"),
         ])
 
     await update.message.reply_text(
@@ -369,45 +371,55 @@ async def _send_user_result(update: Update, user: dict, full: bool = False,
     )
 
 
+# ── Chat result card ──────────────────────────────────────────────────────────
+
 async def _send_chat_result(update: Update, chat: dict, full: bool = False):
     cid   = chat["id"]
     title = escape(chat.get("title") or "Untitled")
     uname = f"@{escape(chat['username'])}" if chat.get("username") else "_no username_"
     ctype = {"supergroup": "Supergroup", "group": "Group",
               "channel": "Channel", "gigagroup": "Gigagroup"}.get(chat["type"], chat["type"])
+    icon  = "📢" if chat["type"] == "channel" else "💬"
 
-    lines = [
-        f"{'📢' if chat['type'] == 'channel' else '💬'} *{title}*",
-        f"ID: `{cid}`",
-        f"Type: {ctype}",
-        f"Username: {uname}",
-    ]
-
+    lines = [f"{icon} *{title}*"]
+    lines.append(f"• ID: `{cid}`")
+    lines.append(f"• Type: {ctype}")
+    lines.append(f"• Username: {uname}")
     if chat.get("member_count"):
-        lines.append(f"Members: `{chat['member_count']:,}`")
-    if chat.get("is_verified"):  lines.append("✅ Verified")
-    if chat.get("is_scam"):      lines.append("⚠️ Scam")
-    if chat.get("is_fake"):      lines.append("⚠️ Fake")
+        lines.append(f"• 👥 Members: `{chat['member_count']:,}`")
+
+    flags = []
+    if chat.get("is_verified"):  flags.append("✅ Verified")
+    if chat.get("is_scam"):      flags.append("⚠️ Scam")
+    if chat.get("is_fake"):      flags.append("⚠️ Fake")
+    if flags:
+        flag_str = " | ".join(flags)
+        lines.append(f"• {flag_str}")
 
     if full:
-        if chat.get("description"):
-            lines.append(f"\n📋 {escape(chat['description'][:200])}")
+        lines.append("")
 
-        # History
+        if chat.get("description"):
+            lines.append(f"📋 *Description*")
+            lines.append(f"• _{escape(chat['description'][:200])}_")
+            lines.append("")
+
         hist = tg_chats.get_history(cid)
         if len(hist) > 1:
             old_titles = [escape(h["title"]) for h in hist[1:4] if h.get("title")]
             if old_titles:
-                lines.append(f"\n🔄 *Previous names:* {', '.join(old_titles)}")
+                lines.append(f"🔄 *Previous names*")
+                for t in old_titles:
+                    lines.append(f"• _{t}_")
+                lines.append("")
 
-        # Top posters
         top = tg_chats.get_top_posters(cid, limit=5)
         if top:
-            lines.append("\n🏆 *Top Members*")
-            medals = ["🥇","🥈","🥉","4️⃣","5️⃣"]
+            medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+            lines.append("🏆 *Top Members*")
             for i, m in enumerate(top):
                 n = escape(m["first_name"] or "Unknown")
-                lines.append(f"{medals[i]} {n} — `{m['message_count']}` msgs")
+                lines.append(f"• {medals[i]} {n} — `{m['message_count']}` msgs")
 
     buttons = []
     if full:

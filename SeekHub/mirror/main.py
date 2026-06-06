@@ -17,6 +17,8 @@ from mirror.track      import cmd_track, cmd_untrack, cmd_tracks
 from mirror.analyze    import cmd_analyze, cmd_heatmap, cmd_export
 from mirror.phone      import cmd_phone
 from mirror.link       import cmd_link
+from mirror.mentions   import cmd_mentions
+from mirror.onlinelog  import cmd_onlinelog
 from mirror.callbacks  import handle_callback
 from mirror.inline     import handle_inline_query
 from mirror.menu       import (
@@ -66,9 +68,13 @@ def build_mirror_app(token: str, mirror_id: int, settings: dict | None = None) -
     app.add_handler(CommandHandler("tracks",  cmd_tracks))
 
     # ── Analysis & export ─────────────────────────────────────────────────────
-    app.add_handler(CommandHandler("analyze", _guarded(cmd_analyze, "analyze_enabled")))
-    app.add_handler(CommandHandler("heatmap", _guarded(cmd_heatmap, "analyze_enabled")))
-    app.add_handler(CommandHandler("export",  _guarded(cmd_export,  "export_enabled")))
+    app.add_handler(CommandHandler("analyze",   _guarded(cmd_analyze,   "analyze_enabled")))
+    app.add_handler(CommandHandler("heatmap",   _guarded(cmd_heatmap,   "analyze_enabled")))
+    app.add_handler(CommandHandler("export",    _guarded(cmd_export,    "export_enabled")))
+
+    # ── Intelligence commands ──────────────────────────────────────────────────
+    app.add_handler(CommandHandler("mentions",  _guarded(cmd_mentions,  "analyze_enabled")))
+    app.add_handler(CommandHandler("onlinelog", _guarded(cmd_onlinelog, "track_online_enabled")))
 
     # ── Native picker results (highest priority) ──────────────────────────────
     app.add_handler(MessageHandler(
