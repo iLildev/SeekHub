@@ -22,6 +22,12 @@ from utils.fmt import escape
 
 logger = logging.getLogger(__name__)
 
+# Loaded once at import — admins have unlimited queries/crystals
+import os as _os
+_ADMIN_IDS: set[int] = set(
+    int(x) for x in _os.environ.get("ADMIN_IDS", "").split(",") if x.strip().isdigit()
+)
+
 
 async def charge_query(update: Update, context: ContextTypes.DEFAULT_TYPE,
                        mirror_id: int, query_text: str = "") -> bool:
@@ -32,6 +38,15 @@ async def charge_query(update: Update, context: ContextTypes.DEFAULT_TYPE,
     user = update.effective_user
     if not user:
         return False
+
+    # ── Admins bypass all quota and crystal checks ─────────────────────────
+    if user.id in _ADMIN_IDS:
+        track_mirror_user(mirror_id, user.id,
+                          username=user.username, first_name=user.first_name)
+        increment_query_count(mirror_id)
+        if query_text:
+            log_query(mirror_id, query_text, user_id=user.id)
+        return True
 
     track_mirror_user(mirror_id, user.id,
                       username=user.username, first_name=user.first_name)

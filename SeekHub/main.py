@@ -23,7 +23,7 @@ from system.start          import cmd_start, WELCOME_TEXT
 from system.points         import cmd_points
 from system.aura           import cmd_aura, cmd_addaura
 from system.plan           import cmd_plan
-from system.admins         import cmd_stats, cmd_ban, cmd_unban
+from system.admins         import cmd_stats, cmd_ban, cmd_unban, cmd_addcrystals
 from system.token_handler  import cmd_token
 from system.mirrors        import cmd_mirror, cmd_mystats
 from system.mirror_settings import cmd_mset, handle_mset_callback
@@ -135,8 +135,9 @@ def build_system_app(token: str) -> Application:
     app.add_handler(CommandHandler("addaura",  cmd_addaura))
     app.add_handler(CommandHandler("plan",     cmd_plan))
     app.add_handler(CommandHandler("stats",    cmd_stats))
-    app.add_handler(CommandHandler("ban",      cmd_ban))
-    app.add_handler(CommandHandler("unban",    cmd_unban))
+    app.add_handler(CommandHandler("ban",         cmd_ban))
+    app.add_handler(CommandHandler("unban",       cmd_unban))
+    app.add_handler(CommandHandler("addcrystals", cmd_addcrystals))
     app.add_handler(CommandHandler("submit",   cmd_submit))
     app.add_handler(CommandHandler("manual",   cmd_manual))
 
