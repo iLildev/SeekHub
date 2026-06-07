@@ -226,11 +226,41 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── analysis:<user_id> ────────────────────────────────────────────────────
     elif data.startswith("analysis:"):
-        uid = int(data.split(":", 1)[1])
-        await query.message.reply_text(
-            f"Use `/analyze {uid}` for full NLP analysis\\.",
-            parse_mode=ParseMode.MARKDOWN_V2,
+        uid  = int(data.split(":", 1)[1])
+        user = tg_users.get(uid)
+        if not user:
+            await query.answer("User not found.", show_alert=True)
+            return
+        name = escape((user.get("first_name") or str(uid)))
+        from services.nlp import (
+            get_word_frequency, get_reaction_stats,
+            get_activity_heatmap, format_heatmap, vocabulary_score
         )
+        words     = get_word_frequency(uid, limit=10)
+        reactions = get_reaction_stats(uid)
+        heatmap   = get_activity_heatmap(uid)
+        vocab     = vocabulary_score(uid)
+        lines     = [f"🧠 *Analysis — {name}*\n"]
+        if words:
+            lines.append("*📝 Top Words*")
+            for word, count in words:
+                lines.append(f"  `{escape(word)}` — {count}×")
+        else:
+            lines.append("*📝 Top Words*\n  _No message data yet_")
+        if reactions:
+            lines.append("\n*❤️ Reactions*")
+            for r in reactions[:5]:
+                lines.append(f"  {r['emoji']} ×{r['total']}")
+        lines.append(
+            f"\n*📚 Vocabulary*\n"
+            f"  {vocab.get('unique_words',0):,} unique / {vocab.get('total_words',0):,} total\n"
+            f"  Richness: `{vocab.get('richness_pct',0)}%`"
+        )
+        if heatmap and any(heatmap.values()):
+            peak = sorted(heatmap.items(), key=lambda x: x[1], reverse=True)[:3]
+            hrs  = ", ".join(f"`{h:02d}:00`" for h, _ in peak)
+            lines.append(f"\n*🕐 Peak Hours*\n  {hrs}")
+        await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
 
     # ── aura:<user_id> ────────────────────────────────────────────────────────
     elif data.startswith("aura:"):
@@ -246,11 +276,95 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
 
-    # ── track_user:<user_id> ──────────────────────────────────────────────────
+    # ── track_user:<user_id> ─ show inline tracking menu ──────────────────────
     elif data.startswith("track_user:"):
-        uid = data.split(":", 1)[1]
+        uid  = int(data.split(":", 1)[1])
+        user = tg_users.get(uid)
+        if not user:
+            await query.answer("User not found.", show_alert=True)
+            return
+        name = escape(user.get("first_name") or str(uid))
+        kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🟢 online",    callback_data=f"track_do:{uid}:online"),
+                InlineKeyboardButton("📝 name",      callback_data=f"track_do:{uid}:name"),
+                InlineKeyboardButton("📋 bio",       callback_data=f"track_do:{uid}:bio"),
+            ],
+            [
+                InlineKeyboardButton("🖼 photo",     callback_data=f"track_do:{uid}:photo"),
+                InlineKeyboardButton("✅ all types", callback_data=f"track_do:{uid}:all"),
+            ],
+        ])
         await query.message.reply_text(
-            f"Use `/track {uid}` to start tracking this user\\.",
+            f"🔔 *تتبع {name}*\n\nاختر ما تريد متابعته:",
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=kb,
+        )
+
+    # ── track_do:<user_id>:<type> ─ actually register tracking ───────────────
+    elif data.startswith("track_do:"):
+        _, uid_s, track_type_key = data.split(":", 2)
+        uid      = int(uid_s)
+        actor_id = query.from_user.id
+
+        from db import sh_users as sh_users_db
+        from db.connection import get_conn
+        sh_user     = sh_users_db.get(actor_id)
+        max_tracking = (sh_user or {}).get("max_tracking", 0)
+        if max_tracking == 0:
+            kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton("👑 ترقية الخطة", callback_data="show_plan"),
+            ]])
+            await query.message.reply_text(
+                "❌ التتبع يتطلب خطة *Pro* أو أعلى\\.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+                reply_markup=kb,
+            )
+            return
+
+        TRACK_TYPES = {
+            "online": "user_online", "name": "user_name",
+            "bio": "user_bio",       "photo": "user_photo",
+        }
+        types_to_add = (
+            list(TRACK_TYPES.values()) if track_type_key == "all"
+            else [TRACK_TYPES[track_type_key]] if track_type_key in TRACK_TYPES
+            else list(TRACK_TYPES.values())
+        )
+
+        added = []
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) AS cnt FROM tg_tracking WHERE tracker_user_id = %s AND is_active = TRUE",
+                    (actor_id,)
+                )
+                current = (cur.fetchone() or {}).get("cnt", 0)
+                if current >= max_tracking:
+                    kb = InlineKeyboardMarkup([[
+                        InlineKeyboardButton("👑 ترقية الخطة", callback_data="show_plan"),
+                    ]])
+                    await query.message.reply_text(
+                        f"❌ وصلت للحد الأقصى \\(`{max_tracking}`\\)\\.\nرقّي خطتك أو أوقف تتبعاً آخر\\.",
+                        parse_mode=ParseMode.MARKDOWN_V2,
+                        reply_markup=kb,
+                    )
+                    return
+                for t in types_to_add:
+                    cur.execute("""
+                        INSERT INTO tg_tracking (tracker_user_id, target_user_id, track_type)
+                        VALUES (%s,%s,%s)
+                        ON CONFLICT (tracker_user_id, target_user_id, track_type) DO NOTHING
+                    """, (actor_id, uid, t))
+                    if cur.rowcount:
+                        added.append(t)
+            conn.commit()
+
+        user = tg_users.get(uid)
+        name = escape(user.get("first_name") or str(uid) if user else str(uid))
+        types_str = escape(", ".join(t.replace("user_", "") for t in added) or "already tracked")
+        await query.message.reply_text(
+            f"✅ تتبع *{name}* — `{types_str}`\nستُبلَّغ بأي تغيير\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
 
@@ -488,6 +602,58 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.MARKDOWN_V2,
             reply_markup=InlineKeyboardMarkup([kb]) if kb else None,
         )
+
+    # ── show_link ─ open referral page inline ────────────────────────────────
+    elif data == "show_link":
+        user      = query.from_user
+        from db import sh_referrals, sh_crystals as sh_cr
+        ref_count = sh_referrals.count(user.id)
+        balance   = sh_cr.get_balance(user.id)
+        system_uname = escape(
+            query.message.bot.username or ""
+        )
+        link = f"https://t\\.me/{system_uname}?start=ref_{user.id}"
+        await query.message.reply_text(
+            f"🔗 *رابط الإحالة الخاص بك*\n\n"
+            f"`{link}`\n\n"
+            f"👥 المدعوون: `{ref_count}`\n"
+            f"💠 الكريستالات: `{balance}`\n\n"
+            f"_كل مستخدم جديد ينضم عبر رابطك يمنحك `10` 💠_",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+
+    # ── show_submit ─ open group submission inline ────────────────────────────
+    elif data == "show_submit":
+        await query.message.reply_text(
+            "📢 *أضف مجموعة لـ SeekHub*\n\n"
+            "استخدم: `/submit @groupusername`\n\n"
+            "• \\+8💠 لكل مجموعة مقبولة\n"
+            "• يجب أن تكون أدمن أو عضو في المجموعة",
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+
+    # ── show_plan ─ open plan page inline ────────────────────────────────────
+    elif data == "show_plan":
+        from db import sh_users as sh_users_mod
+        sh_user   = sh_users_mod.get(query.from_user.id)
+        plan_name = escape((sh_user or {}).get("plan_name") or "Free")
+        daily_q   = (sh_user or {}).get("daily_queries", 5)
+        max_trk   = (sh_user or {}).get("max_tracking", 0)
+        can_exp   = "✅" if (sh_user or {}).get("can_export") else "❌"
+        lines = [
+            f"👑 *خطتك الحالية: {plan_name}*\n",
+            f"• 🔍 Queries يومية: `{daily_q}`",
+            f"• 🔔 تتبع مستخدمين: `{max_trk}`",
+            f"• 📤 Export: {can_exp}",
+            "",
+            "*الخطط المتاحة:*",
+            "• Free — 5 queries/day",
+            "• Pro  — 50 queries/day \\+ tracking",
+            "• Elite — unlimited \\+ export",
+            "",
+            "_للترقية تواصل مع مدير النظام\\._",
+        ]
+        await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
 
     # ── captcha:<answer> ──────────────────────────────────────────────────────
     elif data.startswith("captcha:"):

@@ -21,18 +21,22 @@ async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     sh_users.upsert(user.id, user.username or "", user.first_name or "")
 
-    ref_count  = sh_referrals.count(user.id)
-    crystals   = sh_crystals.get_balance(user.id)
-    bot_uname  = escape(context.bot.username or "")
+    ref_count = sh_referrals.count(user.id)
+    crystals  = sh_crystals.get_balance(user.id)
 
-    link = f"https://t\\.me/{bot_uname}?start=ref_{user.id}"
+    # Referral always points to the SeekHub system, not any specific mirror
+    system_uname = escape(
+        context.bot_data.get("system_bot_username") or context.bot.username or ""
+    )
+    link = f"https://t\\.me/{system_uname}?start=ref_{user.id}"
 
     text = (
-        f"🔗 *Your Referral Link*\n\n"
+        f"🔗 *رابط الإحالة الخاص بك*\n\n"
         f"`{link}`\n\n"
-        f"👥 Referrals: `{ref_count}`\n"
-        f"💎 Crystals earned: `{crystals}`\n\n"
-        f"_Every person who starts the bot via your link earns you `10` crystals\\._"
+        f"👥 المدعوون: `{ref_count}`\n"
+        f"💠 الكريستالات: `{crystals}`\n\n"
+        f"_كل مستخدم جديد ينضم عبر رابطك يمنحك `10` 💠_\n"
+        f"_الدعوة تعمل لكامل منظومة SeekHub، مش لمرآة بعينها\\._"
     )
 
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)

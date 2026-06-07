@@ -132,9 +132,13 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     can_export = (sh_user or {}).get("can_export", False)
 
     if not can_export:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         await update.message.reply_text(
-            "❌ Export requires *Pro* or *Elite* plan\\. Use /plan to upgrade\\.",
+            "❌ Export يتطلب خطة *Pro* أو *Elite*\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("👑 ترقية الخطة", callback_data="show_plan"),
+            ]]),
         )
         return
 

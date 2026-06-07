@@ -55,3 +55,11 @@ def unban(user_id: int):
         with conn.cursor() as cur:
             cur.execute("UPDATE sh_users SET is_banned = FALSE WHERE id = %s", (user_id,))
         conn.commit()
+
+
+def is_seekhub_user(user_id: int) -> bool:
+    """Returns True if this Telegram user has ever interacted with SeekHub."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM sh_users WHERE id = %s LIMIT 1", (user_id,))
+            return cur.fetchone() is not None

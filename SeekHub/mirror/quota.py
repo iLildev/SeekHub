@@ -9,7 +9,7 @@ Every search/lookup goes through charge_query():
   • Over limit, no balance → send helpful error explaining how to earn more, deny
 """
 import logging
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
@@ -49,21 +49,32 @@ async def charge_query(update: Update, context: ContextTypes.DEFAULT_TYPE,
     balance = sh_crystals.get_balance(user.id)
     if balance >= 1:
         sh_crystals.deduct(user.id, 1, "extra_query")
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔗 رابط الإحالة", callback_data="show_link"),
+            InlineKeyboardButton("📢 أضف مجموعة", callback_data="show_submit"),
+        ]])
         await update.message.reply_text(
-            f"💎 \\-1 crystal \\| Remaining: `{balance - 1}`\n"
-            f"_Earn more via /link referrals or /submit_",
+            f"💠 \\-1 crystal \\| Remaining: `{balance - 1}`",
             parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=kb,
         )
         return True
 
     plan_name = escape((sh_user or {}).get("plan_name") or "Free")
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔗 رابط الإحالة \\+10💠", callback_data="show_link"),
+            InlineKeyboardButton("📢 أضف مجموعة \\+8💠",   callback_data="show_submit"),
+        ],
+        [
+            InlineKeyboardButton("👑 ترقية الخطة", callback_data="show_plan"),
+        ],
+    ])
     await update.message.reply_text(
-        f"⛔ *Daily limit reached* \\(`{daily_limit}` queries\\)\n\n"
-        f"*كيف تحصل على المزيد:*\n"
-        f"• 💎 شارك رابط الإحالة \\(/link\\) — *\\+10 crystals* لكل مستخدم جديد\n"
-        f"• 📢 أضف مجموعة جديدة \\(/submit\\) — *\\+8 crystals*\n"
-        f"• 👑 رقّي خطتك \\(/plan\\) — queries يومية أكثر\n\n"
-        f"_أنت على خطة *{plan_name}* حالياً\\._",
+        f"⛔ *وصلت للحد اليومي* \\(`{daily_limit}` queries\\)\n\n"
+        f"_أنت على خطة *{plan_name}*\\._\n"
+        f"اكسب كريستالات أو رقّي خطتك لبحث إضافي:",
         parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=kb,
     )
     return False

@@ -15,7 +15,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
-from db import tg_users, tg_chats, tg_messages, sh_hide_plans
+from db import tg_users, tg_chats, tg_messages, sh_hide_plans, sh_users
 from mirror.quota import charge_query
 from utils.fmt import user_line, chat_line, escape
 
@@ -348,6 +348,11 @@ async def _send_user_result(update: Update, user: dict, full: bool = True,
     if user.get("is_bot"):      badges.append("🤖")
     if badges:
         lines.append(" ".join(badges))
+
+    # SeekHub membership
+    uses_seekhub = sh_users.is_seekhub_user(uid)
+    sh_badge = "✅ يستخدم SeekHub" if uses_seekhub else "❌ لا يستخدم SeekHub"
+    lines.append(sh_badge)
 
     # ── ID ────────────────────────────────────────────────────────────────────
     lines.append("")

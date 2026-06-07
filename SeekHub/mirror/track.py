@@ -9,6 +9,11 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
+def _upgrade_kb():
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("👑 ترقية الخطة", callback_data="show_plan"),
+    ]])
+
 from db.connection import get_conn
 from db import tg_users, sh_users
 from utils.fmt import escape
@@ -44,9 +49,9 @@ async def cmd_track(update: Update, context: ContextTypes.DEFAULT_TYPE):
     max_tracking = (sh_user or {}).get("max_tracking", 0)
     if max_tracking == 0:
         await update.message.reply_text(
-            "❌ Tracking requires a *Pro* or *Elite* plan\\.\n"
-            "Use /plan to upgrade\\.",
+            "❌ التتبع يتطلب خطة *Pro* أو أعلى\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=_upgrade_kb(),
         )
         return
 
@@ -90,9 +95,10 @@ async def cmd_track(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if current >= max_tracking:
         await update.message.reply_text(
-            f"❌ You've reached your tracking limit \\(`{max_tracking}`\\)\\.\n"
-            "Upgrade your plan or use /untrack to remove one\\.",
+            f"❌ وصلت للحد الأقصى \\(`{max_tracking}`\\)\\.\n"
+            "رقّي خطتك أو أوقف تتبع مستخدم آخر أولاً\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=_upgrade_kb(),
         )
         return
 
@@ -190,7 +196,7 @@ async def cmd_tracks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not rows:
         await update.message.reply_text(
-            "📭 No active tracking entries\\. Use /track to start monitoring a user\\.",
+            "📭 لا يوجد تتبع نشط حالياً\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
