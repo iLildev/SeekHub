@@ -259,7 +259,7 @@ def _check_hide(user_id: int, searcher_id: int) -> str | None:
     return None
 
 
-# ── Clean User Profile Card ───────────────────────────────────────────────────
+# ── FunStat-style User Profile Card ──────────────────────────────────────────
 
 async def _send_user_result(update: Update, user: dict, full: bool = True,
                             searcher_id: int | None = None):
@@ -268,7 +268,6 @@ async def _send_user_result(update: Update, user: dict, full: bool = True,
     if hide_level == "shadow":
         return
 
-    # Track view
     if searcher_id:
         try:
             tg_users.track_profile_view(searcher_id, uid)
@@ -281,117 +280,168 @@ async def _send_user_result(update: Update, user: dict, full: bool = True,
     uname = user.get("username") or ""
 
     if hide_level == "ghost":
-        uname_display = ""
+        uname_line = ""
     elif uname:
-        uname_display = f"@{escape(uname)}"
+        uname_line = f"@{escape(uname)}"
     else:
-        uname_display = "_no username_"
+        uname_line = "_no username_"
 
-    # ── Header ────────────────────────────────────────────────────────────────
-    # Badges row
+    # ── badges ────────────────────────────────────────────────────────────────
     badges = []
-    if user.get("is_premium"):  badges.append("💎 Premium")
-    if user.get("is_verified"): badges.append("✅ Verified")
-    if user.get("is_bot"):      badges.append("🤖 Bot")
-    if user.get("is_deleted"):  badges.append("🗑 Deleted")
-    badge_line = "  ".join(badges) if badges else ""
-
+    if user.get("is_premium"):  badges.append("💎")
+    if user.get("is_verified"): badges.append("✅")
+    if user.get("is_bot"):      badges.append("🤖")
+    if user.get("is_deleted"):  badges.append("🗑")
     uses_seekhub = sh_users.is_seekhub_user(uid)
-    seekhub_line = "✅ SeekHub user" if uses_seekhub else "⚪ Not on SeekHub"
+    badges.append("🔵" if uses_seekhub else "⚪")
 
-    lines = [f"👤 *{name}*"]
-    if uname_display:
-        lines.append(uname_display)
-    if badge_line:
-        lines.append(badge_line)
-    lines.append(seekhub_line)
-    lines.append(f"`{uid}`")
-
-    # ── Stats ─────────────────────────────────────────────────────────────────
+    # ── pull stats ────────────────────────────────────────────────────────────
     stats         = tg_users.get_extended_stats(uid)
     total_msgs    = int(stats.get("total_messages") or 0)
     total_media   = int(stats.get("total_media")    or 0)
     total_replies = int(stats.get("total_replies")  or 0)
     group_count   = int(stats.get("group_count")    or 0)
+    channel_count = int(stats.get("channel_count")  or 0)
     circles       = int(stats.get("circles")        or 0)
     voice         = int(stats.get("voice")          or 0)
     admin_count   = int(stats.get("admin_count")    or 0)
     fav           = stats.get("fav_group")
     first_msg     = stats.get("first_message")
     last_msg      = stats.get("last_message")
+    view_count    = tg_users.get_profile_view_count(uid)
 
     reply_pct = round(total_replies / total_msgs * 100) if total_msgs else 0
     media_pct = round(total_media   / total_msgs * 100) if total_msgs else 0
 
-    lines.append("")
-    lines.append("📊 *Activity*")
+    # ── history ───────────────────────────────────────────────────────────────
+    username_hist = tg_users.get_username_history(uid)
+    name_hist     = tg_users.get_name_history(uid)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # BUILD CARD  (FunStat style: tree lines, clear sections, dividers)
+    # ═════════════════════════════════════════════════════════════════════════
+    D  = "─" * 18          # divider
+    T  = "├"               # tree branch
+    L  = "└"               # tree last
+    lines = []
+
+    # ── § 1 · HEADER ──────────────────────────────────────────────────────────
+    badge_str = "  ".join(badges)
+    lines += [
+        f"👤 *{name}*",
+        uname_line,
+        f"`{uid}`  {badge_str}",
+        "",
+    ]
+
+    # ── § 2 · ACTIVITY ────────────────────────────────────────────────────────
+    lines.append(f"📊 *Activity*  `{D}`")
 
     if first_msg and last_msg:
         from_d = escape(first_msg.strftime("%b %Y"))
         to_d   = escape(last_msg.strftime("%b %Y"))
-        lines.append(f"• Active: `{from_d}` → `{to_d}`")
+        lines.append(f"{T} 📅 `{from_d}` → `{to_d}`")
 
-    lines.append(f"• Messages: `{total_msgs:,}` across `{group_count}` groups")
+    # messages + groups row
+    msgs_str   = escape(f"{total_msgs:,}")
+    groups_str = escape(str(group_count))
+    lines.append(f"{T} 💬 `{msgs_str}` msgs  ·  👥 `{groups_str}` groups")
+
+    if channel_count:
+        lines.append(f"{T} 📢 `{channel_count}` channels")
 
     if total_msgs > 0:
-        lines.append(f"• Replies: `{reply_pct}%`  ·  Media: `{media_pct}%`")
+        rp = escape(str(reply_pct))
+        mp = escape(str(media_pct))
+        lines.append(f"{T} ↩️ `{rp}%` replies  ·  🖼 `{mp}%` media")
 
+    # circles + voice (only if non-zero)
     if circles or voice:
-        lines.append(f"• Voice notes: `{voice}`  ·  Video circles: `{circles}`")
+        cv = []
+        if circles: cv.append(f"🎥 `{circles}` circles")
+        if voice:   cv.append(f"🎙 `{voice}` voice")
+        lines.append(f"{T} " + "  ·  ".join(cv))
 
     if admin_count:
-        lines.append(f"• Admin in `{admin_count}` group{'s' if admin_count != 1 else ''}")
+        s = "s" if admin_count != 1 else ""
+        lines.append(f"{T} 👑 Admin in `{admin_count}` group{s}")
 
     if fav:
-        fav_name = escape(fav.get("title") or fav.get("username") or "Unknown")
-        lines.append(f"• Favorite group: {fav_name}")
+        fav_name = escape(fav.get("title") or fav.get("username") or "?")
+        lines.append(f"{T} ⭐ Fav group: {fav_name}")
 
-    view_count = tg_users.get_profile_view_count(uid)
-    if view_count:
-        lines.append(f"• Profile views: `{view_count}`")
+    last_stat = f"{L} 👁 `{view_count}` profile views" if view_count else None
 
-    # ── History preview ───────────────────────────────────────────────────────
-    username_hist = tg_users.get_username_history(uid)
-    name_hist     = tg_users.get_name_history(uid)
+    # ── § 3 · HISTORY ─────────────────────────────────────────────────────────
+    has_uname_hist = username_hist and len(username_hist) > 1
+    has_name_hist  = name_hist and len(name_hist) > 1
 
-    if username_hist and len(username_hist) > 1:
-        prev = [f"@{escape(h['username'])}" for h in username_hist[1:4] if h.get("username")]
-        if prev:
-            lines.append("")
-            lines.append(f"🔄 *Previous usernames*: {' · '.join(prev)}")
-
-    if name_hist and len(name_hist) > 1:
+    if has_uname_hist or has_name_hist:
+        if last_stat:
+            lines.append(last_stat)
+            last_stat = None
         lines.append("")
-        lines.append("📝 *Name changes*")
-        for h in name_hist[1:3]:
-            dt     = h["seen_at"].strftime("%b %Y") if h.get("seen_at") else "?"
-            full_n = " ".join(filter(None, [h.get("first_name"), h.get("last_name")])) or "?"
-            lines.append(f"  `{dt}` — {escape(full_n)}")
+        lines.append(f"🗂 *History*  `{D}`")
 
-    # ── Action buttons (clean, clear labels) ─────────────────────────────────
+        # usernames
+        if has_uname_hist:
+            prev_unames = [f"@{escape(h['username'])}" for h in username_hist[:5] if h.get("username")]
+            # first is current, rest are old
+            old = prev_unames[1:] if len(prev_unames) > 1 else []
+            if old:
+                prefix = T if has_name_hist else L
+                lines.append(f"{prefix} 🔄 " + "  ·  ".join(old))
+
+        # names
+        if has_name_hist:
+            name_rows = []
+            for h in name_hist[1:4]:  # skip current, show up to 3 old
+                dt    = escape(h["seen_at"].strftime("%b %Y")) if h.get("seen_at") else "?"
+                full_n = " ".join(filter(None, [h.get("first_name"), h.get("last_name")])) or "?"
+                name_rows.append((dt, escape(full_n)))
+            for i, (dt, fn_) in enumerate(name_rows):
+                prefix = L if i == len(name_rows) - 1 else T
+                lines.append(f"{prefix} 📝 `{dt}` — {fn_}")
+    else:
+        if last_stat:
+            lines.append(last_stat)
+
+    # ── § 4 · SEEKHUB BADGE ───────────────────────────────────────────────────
+    lines.append("")
+    if uses_seekhub:
+        lines.append("🔵 _Registered SeekHub user_")
+    else:
+        lines.append("⚪ _Not registered on SeekHub_")
+
+    # ── BUTTONS  (FunStat layout) ──────────────────────────────────────────────
     costs = CRYSTAL_COSTS
     buttons = [
+        # Row 1: quick actions
         [
-            InlineKeyboardButton("📊 Full Stats",          callback_data=f"stats:{uid}"),
-            InlineKeyboardButton("🧠 Analysis",            callback_data=f"analysis:{uid}"),
-            InlineKeyboardButton("🔔 Track",               callback_data=f"track_user:{uid}"),
+            InlineKeyboardButton("📊 Stats",      callback_data=f"stats:{uid}"),
+            InlineKeyboardButton("🧠 Analysis",   callback_data=f"analysis:{uid}"),
+            InlineKeyboardButton("🔔 Track",       callback_data=f"track_user:{uid}"),
         ],
+        # Row 2: crystal-gated history
         [
-            InlineKeyboardButton(f"📋 Name History  {costs['names']}💠",    callback_data=f"crystal_names:{uid}"),
-            InlineKeyboardButton(f"👥 Groups  {costs['groups']}💠",         callback_data=f"crystal_groups:{uid}"),
+            InlineKeyboardButton(f"🗂 Names  {costs['names']}💠",     callback_data=f"crystal_names:{uid}"),
+            InlineKeyboardButton(f"👥 Groups  {costs['groups']}💠",   callback_data=f"crystal_groups:{uid}"),
         ],
+        # Row 3: crystal-gated content
         [
-            InlineKeyboardButton(f"💬 Messages  {costs['messages']}💠",     callback_data=f"crystal_msgs:{uid}:0"),
-            InlineKeyboardButton(f"📢 Channels  {costs['channels']}💠",     callback_data=f"crystal_channels:{uid}"),
+            InlineKeyboardButton(f"💬 Messages  {costs['messages']}💠",  callback_data=f"crystal_msgs:{uid}:0"),
+            InlineKeyboardButton(f"📢 Channels  {costs['channels']}💠",  callback_data=f"crystal_channels:{uid}"),
         ],
+        # Row 4: social / reactions
         [
-            InlineKeyboardButton(f"🤝 Interactions  {costs['friends']}💠",  callback_data=f"crystal_friends:{uid}"),
-            InlineKeyboardButton(f"❤️ Reactions  {costs['reactions']}💠",   callback_data=f"crystal_reactions:{uid}"),
+            InlineKeyboardButton(f"🤝 Mutual groups",                    callback_data=f"mutual:{uid}"),
+            InlineKeyboardButton(f"❤️ Reactions  {costs['reactions']}💠", callback_data=f"crystal_reactions:{uid}"),
         ],
+        # Row 5: extra / share
         [
-            InlineKeyboardButton("🤝 Mutual Groups",       callback_data=f"mutual:{uid}"),
-            InlineKeyboardButton("🌟 Reputation",          callback_data=f"aura:{uid}"),
-            InlineKeyboardButton("🔗 Share",               switch_inline_query=f"user {uid}"),
+            InlineKeyboardButton(f"🌟 Reputation",  callback_data=f"aura:{uid}"),
+            InlineKeyboardButton("💠 Crystal info", callback_data="crystal_prices"),
+            InlineKeyboardButton("🔗 Share",         switch_inline_query=f"user {uid}"),
         ],
     ]
 
