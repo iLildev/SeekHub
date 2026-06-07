@@ -1,4 +1,4 @@
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
@@ -11,7 +11,6 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sh_user = sh_users.get(user.id)
 
     if not sh_user:
-        # Auto-register on first profile view
         sh_users.upsert(user.id, user.username or "", user.first_name or "")
         sh_user = sh_users.get(user.id)
 
@@ -28,28 +27,45 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     plan_name = sh_user.get("plan_name") or "Free"
     plan_feat = sh_user.get("plan_features") or {}
     badge     = plan_feat.get("badge", "⚪")
+    daily_q   = sh_user.get("daily_queries", 5)
+    max_trk   = sh_user.get("max_tracking", 0)
 
-    joined = sh_user["joined_at"].strftime("%Y\\-%m\\-%d") if sh_user.get("joined_at") else "N/A"
-
-    uname_line = (
-        f"Username: @{escape(user.username)}"
-        if user.username
-        else "Username: _none_"
-    )
+    joined = sh_user["joined_at"].strftime("%b %d, %Y") if sh_user.get("joined_at") else "—"
+    name   = escape(user.first_name or "User")
+    uname  = f"@{escape(user.username)}" if user.username else "_no username_"
 
     lines = [
-        f"👤 *{escape(user.first_name)}*",
-        f"ID: `{user.id}`",
-        uname_line,
-        f"Joined: `{joined}`",
-        f"\n{badge} Plan: *{escape(plan_name)}*",
-        f"💎 Crystals: `{crystals}`",
-        f"🌟 Aura: `{aura}`",
+        f"👤 *{name}*",
+        f"{uname}  ·  `{user.id}`",
+        f"Joined: {joined}",
+        "",
+        f"{badge} *{escape(plan_name)} Plan*",
+        f"• 🔍 Daily searches: `{daily_q}`",
+        f"• 🔔 Tracking slots: `{max_trk}`",
+        "",
+        f"💠 Crystals: `{crystals}`",
+        f"🌟 Reputation: `{aura}`",
         f"👥 Referrals: `{refs}`",
-        f"\n🔗 Your referral:\n`https://t\\.me/{escape(context.bot.username)}?start=ref_{user.id}`",
     ]
+
+    bot_uname = escape(context.bot.username or "")
+    ref_link  = f"`https://t\\.me/{bot_uname}?start=ref_{user.id}`"
+    lines.append(f"\n🔗 *Your referral link*\n{ref_link}")
+    lines.append(f"_Each new user earns you \\+10 💠_")
+
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔗 Share Referral",  callback_data="show_link"),
+            InlineKeyboardButton("👑 Upgrade Plan",    callback_data="show_plan"),
+        ],
+        [
+            InlineKeyboardButton("🔔 My Tracking",     callback_data="kb_tracks"),
+            InlineKeyboardButton("💠 Crystal Prices",  callback_data="crystal_prices"),
+        ],
+    ])
 
     await update.message.reply_text(
         "\n".join(lines),
         parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=kb,
     )

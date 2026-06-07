@@ -1,23 +1,10 @@
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
 from db import sh_users, tg_users
 from utils.fmt import escape
 from keyboards.mirror.main import main_keyboard
-
-
-MIRROR_WELCOME = (
-    "🔍 *SeekHub — Telegram Intelligence*\n\n"
-    "The largest Telegram indexing database\\.\n"
-    "Search any user, group, channel, or bot\\.\n\n"
-    "━━━━━━━━━━━━━━━━━━\n"
-    "🔍 *Search / Seek* — search the database\n"
-    "🎯 *Select* — pick what you're looking for\n"
-    "📋 *Menu* — more features\n"
-    "━━━━━━━━━━━━━━━━━━\n\n"
-    "💡 You can also type `@this_bot query` in any chat for instant search\\."
-)
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -39,8 +26,33 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except (ValueError, IndexError):
             pass
 
+    first = escape(user.first_name or "there")
+
+    welcome = (
+        f"👋 Hey *{first}\\!*\n\n"
+        f"I'm *SeekHub* — a Telegram intelligence database\\.\n"
+        f"Search any user, group, or channel by name, @username, or ID\\.\n\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🔍 *Search* — type any name or @username\n"
+        f"🎯 *Select* — pick from your contacts/groups directly\n"
+        f"📋 *Menu* — your profile, referrals, tracking & more\n"
+        f"━━━━━━━━━━━━━━━━━━\n\n"
+        f"💡 *Tip:* Just type a name or @username here — no command needed\\."
+    )
+
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("❓ How does it work?", callback_data="help_how"),
+        InlineKeyboardButton("👤 My Profile",        callback_data="kb_profile"),
+    ]])
+
     await update.message.reply_text(
-        MIRROR_WELCOME,
+        welcome,
         parse_mode=ParseMode.MARKDOWN_V2,
         reply_markup=main_keyboard(),
+    )
+    # Brief tip card
+    await update.message.reply_text(
+        "👆 Use the buttons below to navigate, or just start typing\\.",
+        parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=kb,
     )

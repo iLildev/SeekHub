@@ -653,6 +653,30 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
 
+    # ── help_how ─ quick onboarding card ──────────────────────────────────────
+    elif data == "help_how":
+        lines = [
+            "❓ *How SeekHub works*\n",
+            "*Search a user:*",
+            "Just type their name or @username — no command needed\\.",
+            "",
+            "*Search a group or channel:*",
+            "Type the group name or use 🎯 Select to pick from your list\\.",
+            "",
+            "*Profile cards:*",
+            "Each result shows activity stats, name history, and action buttons\\.",
+            "Tap any button to dig deeper — some details cost 💠 crystals\\.",
+            "",
+            "*Earn crystals:*",
+            "• Share your referral link — \\+10💠 per new user",
+            "• Submit a group — \\+8💠 per approval",
+            "",
+            "*Track a user:*",
+            "Get notified when they change name, bio, photo, or come online\\.",
+            "Requires a Pro plan\\.",
+        ]
+        await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
+
     # ── captcha:<answer> ──────────────────────────────────────────────────────
     elif data.startswith("captcha:"):
         from mirror.captcha import handle_captcha_callback

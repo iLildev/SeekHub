@@ -28,22 +28,21 @@ logger = logging.getLogger(__name__)
 
 def _menu_inline() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
+        # ── Search tools ──
+        [InlineKeyboardButton("💬 Search in Messages", switch_inline_query_current_chat="")],
         [
-            InlineKeyboardButton("💬 Message Search", switch_inline_query_current_chat=""),
-            InlineKeyboardButton("📍 Nearby Users",   callback_data="kb_near"),
+            InlineKeyboardButton("📞 Phone Lookup",    callback_data="kb_phone"),
+            InlineKeyboardButton("📍 Nearby Users",    callback_data="kb_near"),
         ],
+        # ── Tracking ──
+        [InlineKeyboardButton("🔔 Track a User",       callback_data="kb_track")],
+        [InlineKeyboardButton("📋 My Active Tracking", callback_data="kb_tracks")],
+        # ── Account ──
         [
-            InlineKeyboardButton("📞 Phone Lookup",   callback_data="kb_phone"),
-            InlineKeyboardButton("👁 Track a User",   callback_data="kb_track"),
+            InlineKeyboardButton("👤 My Profile",      callback_data="kb_profile"),
+            InlineKeyboardButton("🔗 My Referral",     callback_data="kb_link"),
         ],
-        [
-            InlineKeyboardButton("📊 My Profile",     callback_data="kb_profile"),
-            InlineKeyboardButton("🔗 My Referral",    callback_data="kb_link"),
-        ],
-        [
-            InlineKeyboardButton("📋 My Tracks",      callback_data="kb_tracks"),
-            InlineKeyboardButton("📤 Export",         callback_data="kb_export"),
-        ],
+        [InlineKeyboardButton("📤 Export Data",        callback_data="kb_export")],
     ])
 
 
@@ -347,25 +346,47 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     data  = query.data
 
-    routes = {
-        "kb_profile": "`/profile`",
-        "kb_link":    "`/link`",
-        "kb_tracks":  "`/tracks`",
-        "kb_export":  "`/export`",
-    }
+    # ── Direct action: run the feature inline, no "use /command" redirect ────
+    if data == "kb_profile":
+        from mirror.profile import cmd_profile
+        # Fake an update so cmd_profile works with query.message context
+        class _FakeUpdate:
+            effective_user = query.from_user
+            message        = query.message
+        await cmd_profile(_FakeUpdate(), context)
+        return
+
+    if data == "kb_link":
+        from mirror.link import cmd_link
+        class _FakeUpdate:
+            effective_user = query.from_user
+            message        = query.message
+        await cmd_link(_FakeUpdate(), context)
+        return
+
+    if data == "kb_tracks":
+        from mirror.track import cmd_tracks
+        class _FakeUpdate:
+            effective_user = query.from_user
+            message        = query.message
+        await cmd_tracks(_FakeUpdate(), context)
+        return
+
+    if data == "kb_export":
+        from mirror.analyze import cmd_export
+        class _FakeUpdate:
+            effective_user = query.from_user
+            message        = query.message
+            args           = []
+        context.args = []
+        await cmd_export(_FakeUpdate(), context)
+        return
 
     prompts = {
-        "kb_near":  ("near",         "📍 Send a @username to find nearby users:"),
-        "kb_phone": ("phone",        "📞 Send the phone number \\(e\\.g\\. \\+12345678900\\):"),
-        "kb_track": ("track_prompt", "👁 Send @username to track:"),
+        "kb_near":  ("near",         "📍 *Find Nearby Users*\n\nSend a @username to compare locations:"),
+        "kb_phone": ("phone",        "📞 *Phone Lookup*\n\nSend the phone number \\(e\\.g\\. \\+12345678900\\):"),
+        "kb_track": ("track_prompt", "🔔 *Track a User*\n\nSend @username or Telegram ID to start tracking:"),
     }
-
-    if data in routes:
-        await query.message.reply_text(
-            f"Use the command: {routes[data]}",
-            parse_mode=ParseMode.MARKDOWN_V2,
-        )
-        return
 
     if data in prompts:
         key, prompt_text = prompts[data]
