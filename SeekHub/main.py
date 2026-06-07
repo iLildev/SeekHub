@@ -21,7 +21,7 @@ from db import init_db
 
 from system.start          import cmd_start, WELCOME_TEXT
 from system.points         import cmd_points
-from system.aura           import cmd_aura, cmd_addaura
+from system.aura           import cmd_aura, cmd_addaura, handle_aura_vote_callback
 from system.plan           import cmd_plan
 from system.admins         import cmd_stats, cmd_ban, cmd_unban, cmd_addcrystals
 from system.token_handler  import cmd_token
@@ -147,6 +147,7 @@ def build_system_app(token: str) -> Application:
     app.add_handler(CallbackQueryHandler(handle_hide_buy_callback,   pattern=r"^hide_buy:"))
     app.add_handler(CallbackQueryHandler(handle_manual_callback,     pattern=r"^manual:"))
     app.add_handler(CallbackQueryHandler(handle_mset_callback,       pattern=r"^mset:"))
+    app.add_handler(CallbackQueryHandler(handle_aura_vote_callback,  pattern=r"^aura_vote:"))
 
     app.add_handler(PreCheckoutQueryHandler(handle_pre_checkout))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, handle_successful_payment))

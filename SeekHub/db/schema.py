@@ -399,10 +399,12 @@ CREATE TABLE IF NOT EXISTS sh_aura (
     id          SERIAL PRIMARY KEY,
     from_id     BIGINT NOT NULL REFERENCES sh_users(id),
     to_id       BIGINT NOT NULL REFERENCES sh_users(id),
-    amount      INT NOT NULL,
-    note        TEXT,
-    created_at  TIMESTAMPTZ DEFAULT NOW()
+    amount      SMALLINT NOT NULL CHECK (amount IN (1, -1)),
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (from_id, to_id)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS sh_aura_unique_vote ON sh_aura(from_id, to_id);
 
 CREATE TABLE IF NOT EXISTS sh_referrals (
     referrer_id BIGINT NOT NULL REFERENCES sh_users(id),
