@@ -158,8 +158,15 @@ def build_system_app(token: str) -> Application:
 
 
 # ── Userbot (MTProto) ─────────────────────────────────────────────────────────
+# ⚠️  الـ Userbot معطّل افتراضياً لأنه يعمل على حساب Telegram شخصي وقد يعرّضه للحظر.
+#     لتفعيله لاحقاً: أضف ENABLE_USERBOT=true في Secrets ثم أعدّ تشغيل البوت.
+#     كذلك تحتاج: USERBOT_API_ID, USERBOT_API_HASH, USERBOT_SESSION (من gen_session.py)
 
 async def start_userbot(system_app: Application) -> object | None:
+    if os.environ.get("ENABLE_USERBOT", "").lower() != "true":
+        logger.info("Userbot disabled — set ENABLE_USERBOT=true in Secrets to enable MTProto collection.")
+        return None
+
     from userbot.client import build_client, is_configured
     if not is_configured():
         logger.warning(
