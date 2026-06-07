@@ -4,7 +4,8 @@ main.py — SeekHub entry point
 Starts concurrently:
   1. System bot  (@SeekHubBot)    — management only
   2. Collector bot (optional)     — passive Bot API indexer
-  3. Userbot / MTProto (optional) — active indexer, scraper, online tracker
+  3. Mirror bots                  — one PTB app per active mirror in DB
+  4. Userbot / MTProto (optional) — active indexer, scraper, online tracker
 """
 import asyncio
 import logging
@@ -32,6 +33,9 @@ from system.hide           import (
     cmd_hide, handle_hide_buy_callback,
     handle_pre_checkout, handle_successful_payment,
 )
+from system.submit         import cmd_submit
+
+from runner import MirrorRunner
 
 from services.statistics import get_stats_fmt
 from keyboards.system.main import main_keyboard, back_keyboard
@@ -143,6 +147,7 @@ def build_system_app(token: str) -> Application:
     app.add_handler(CommandHandler("ban",      cmd_ban))
     app.add_handler(CommandHandler("unban",    cmd_unban))
     app.add_handler(CommandHandler("hide",     cmd_hide))
+    app.add_handler(CommandHandler("submit",   cmd_submit))
 
     app.add_handler(CallbackQueryHandler(handle_captcha_callback,    pattern=r"^captcha_"))
     app.add_handler(CallbackQueryHandler(handle_check_join_callback, pattern=r"^check_join$"))
@@ -244,9 +249,22 @@ async def main():
 
     userbot_client = await start_userbot(system_app)
 
+    # ── Mirror bots ───────────────────────────────────────────────────────────
+    mirror_runner = MirrorRunner()
+    from db import sh_mirrors
+    active_mirrors = sh_mirrors.get_all_active()
+    if active_mirrors:
+        await mirror_runner.start_all(active_mirrors, userbot_client=userbot_client)
+        logger.info("Started %d mirror bot(s)", len(active_mirrors))
+    else:
+        logger.info("No active mirrors in DB — mirror runner idle")
+
+    system_app.bot_data["mirror_runner"] = mirror_runner
+
     logger.info(
-        "SeekHub fully operational — system bot ✅ | collector %s | userbot %s",
+        "SeekHub fully operational — system bot ✅ | collector %s | mirrors %s | userbot %s",
         "✅" if collector_app else "⚠️ (set COLLECTOR_BOT_TOKEN)",
+        f"✅ ({len(active_mirrors)})" if active_mirrors else "💤 (none registered)",
         "✅" if userbot_client else "⚠️ (run gen_session.py)",
     )
 
@@ -256,6 +274,7 @@ async def main():
     except (KeyboardInterrupt, SystemExit):
         logger.info("Shutting down...")
     finally:
+        await mirror_runner.stop_all()
         if userbot_client:
             await userbot_client.stop()
         if collector_app:

@@ -1,6 +1,0 @@
-python-telegram-bot[job-queue]==22.7
-psycopg2-binary==2.9.12
-python-dotenv==1.2.2
-asyncpg==0.31.0
-pyrogram==2.0.106
-tgcrypto==1.2.5
