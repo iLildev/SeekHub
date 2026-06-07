@@ -9,14 +9,14 @@ from keyboards.mirror.main import main_keyboard
 
 MIRROR_WELCOME = (
     "🔍 *SeekHub — Telegram Intelligence*\n\n"
-    "أكبر قاعدة بيانات لفهرسة Telegram\\.\n"
-    "ابحث عن أي مستخدم، مجموعة، قناة أو بوت\\.\n\n"
+    "The largest Telegram indexing database\\.\n"
+    "Search any user, group, channel, or bot\\.\n\n"
     "━━━━━━━━━━━━━━━━━━\n"
-    "🔍 *Search / Seek* — ابحث في قاعدة البيانات\n"
-    "🎯 *Select* — اختر نوع ما تبحث عنه\n"
-    "📋 *Menu* — بقية المميزات\n"
+    "🔍 *Search / Seek* — search the database\n"
+    "🎯 *Select* — pick what you're looking for\n"
+    "📋 *Menu* — more features\n"
     "━━━━━━━━━━━━━━━━━━\n\n"
-    "💡 يمكنك أيضاً كتابة `@هذا_البوت query` في أي محادثة للبحث الفوري\\."
+    "💡 You can also type `@this_bot query` in any chat for instant search\\."
 )
 
 

@@ -50,8 +50,8 @@ async def charge_query(update: Update, context: ContextTypes.DEFAULT_TYPE,
     if balance >= 1:
         sh_crystals.deduct(user.id, 1, "extra_query")
         kb = InlineKeyboardMarkup([[
-            InlineKeyboardButton("🔗 رابط الإحالة", callback_data="show_link"),
-            InlineKeyboardButton("📢 أضف مجموعة", callback_data="show_submit"),
+            InlineKeyboardButton("🔗 Referral link", callback_data="show_link"),
+            InlineKeyboardButton("📢 Submit group",  callback_data="show_submit"),
         ]])
         await update.message.reply_text(
             f"💠 \\-1 crystal \\| Remaining: `{balance - 1}`",
@@ -63,17 +63,17 @@ async def charge_query(update: Update, context: ContextTypes.DEFAULT_TYPE,
     plan_name = escape((sh_user or {}).get("plan_name") or "Free")
     kb = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔗 رابط الإحالة \\+10💠", callback_data="show_link"),
-            InlineKeyboardButton("📢 أضف مجموعة \\+8💠",   callback_data="show_submit"),
+            InlineKeyboardButton("🔗 Referral link +10💠", callback_data="show_link"),
+            InlineKeyboardButton("📢 Submit group +8💠",   callback_data="show_submit"),
         ],
         [
-            InlineKeyboardButton("👑 ترقية الخطة", callback_data="show_plan"),
+            InlineKeyboardButton("👑 Upgrade Plan", callback_data="show_plan"),
         ],
     ])
     await update.message.reply_text(
-        f"⛔ *وصلت للحد اليومي* \\(`{daily_limit}` queries\\)\n\n"
-        f"_أنت على خطة *{plan_name}*\\._\n"
-        f"اكسب كريستالات أو رقّي خطتك لبحث إضافي:",
+        f"⛔ *Daily limit reached* \\(`{daily_limit}` queries\\)\n\n"
+        f"_You're on the *{plan_name}* plan\\._\n"
+        f"Earn crystals or upgrade to keep searching:",
         parse_mode=ParseMode.MARKDOWN_V2,
         reply_markup=kb,
     )

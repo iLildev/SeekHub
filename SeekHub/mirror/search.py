@@ -351,7 +351,7 @@ async def _send_user_result(update: Update, user: dict, full: bool = True,
 
     # SeekHub membership
     uses_seekhub = sh_users.is_seekhub_user(uid)
-    sh_badge = "✅ يستخدم SeekHub" if uses_seekhub else "❌ لا يستخدم SeekHub"
+    sh_badge = "✅ Uses SeekHub" if uses_seekhub else "❌ Doesn't use SeekHub"
     lines.append(sh_badge)
 
     # ── ID ────────────────────────────────────────────────────────────────────

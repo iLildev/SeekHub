@@ -11,7 +11,7 @@ from telegram.constants import ParseMode
 
 def _upgrade_kb():
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("👑 ترقية الخطة", callback_data="show_plan"),
+        InlineKeyboardButton("👑 Upgrade Plan", callback_data="show_plan"),
     ]])
 
 from db.connection import get_conn
@@ -49,7 +49,7 @@ async def cmd_track(update: Update, context: ContextTypes.DEFAULT_TYPE):
     max_tracking = (sh_user or {}).get("max_tracking", 0)
     if max_tracking == 0:
         await update.message.reply_text(
-            "❌ التتبع يتطلب خطة *Pro* أو أعلى\\.",
+            "❌ Tracking requires a *Pro* plan or higher\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
             reply_markup=_upgrade_kb(),
         )
@@ -95,8 +95,8 @@ async def cmd_track(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if current >= max_tracking:
         await update.message.reply_text(
-            f"❌ وصلت للحد الأقصى \\(`{max_tracking}`\\)\\.\n"
-            "رقّي خطتك أو أوقف تتبع مستخدم آخر أولاً\\.",
+            f"❌ Tracking limit reached \\(`{max_tracking}`\\)\\.\n"
+            "Upgrade your plan or untrack someone first\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
             reply_markup=_upgrade_kb(),
         )
@@ -196,7 +196,7 @@ async def cmd_tracks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not rows:
         await update.message.reply_text(
-            "📭 لا يوجد تتبع نشط حالياً\\.",
+            "📭 No active tracking entries\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return

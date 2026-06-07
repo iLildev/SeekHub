@@ -31,12 +31,12 @@ async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     link = f"https://t\\.me/{system_uname}?start=ref_{user.id}"
 
     text = (
-        f"🔗 *رابط الإحالة الخاص بك*\n\n"
+        f"🔗 *Your Referral Link*\n\n"
         f"`{link}`\n\n"
-        f"👥 المدعوون: `{ref_count}`\n"
-        f"💠 الكريستالات: `{crystals}`\n\n"
-        f"_كل مستخدم جديد ينضم عبر رابطك يمنحك `10` 💠_\n"
-        f"_الدعوة تعمل لكامل منظومة SeekHub، مش لمرآة بعينها\\._"
+        f"👥 Referrals: `{ref_count}`\n"
+        f"💠 Crystals earned: `{crystals}`\n\n"
+        f"_Every person who joins via your link earns you `10` 💠_\n"
+        f"_Works across all of SeekHub — not tied to any single mirror\\._"
     )
 
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)

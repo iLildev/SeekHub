@@ -230,7 +230,7 @@ async def _do_direct_lookup(update: Update, query: str, searcher_id: int):
         if user:
             if _is_shadow(user["id"], searcher_id):
                 await update.message.reply_text(
-                    "😔 هذا المستخدم أخفى نفسه من نتائج البحث\\.",
+                    "😔 This user has hidden themselves from search results\\.",
                     parse_mode=ParseMode.MARKDOWN_V2,
                 )
                 return
@@ -244,7 +244,7 @@ async def _do_direct_lookup(update: Update, query: str, searcher_id: int):
             return
 
         await update.message.reply_text(
-            f"😔 لا يوجد مستخدم أو مجموعة بالـ ID `{entity_id}` في قاعدة البيانات\\.",
+            f"😔 No user or group found with ID `{entity_id}` in the database\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
         return
@@ -254,7 +254,7 @@ async def _do_direct_lookup(update: Update, query: str, searcher_id: int):
     if user:
         if _is_shadow(user["id"], searcher_id):
             await update.message.reply_text(
-                "😔 هذا المستخدم أخفى نفسه من نتائج البحث\\.",
+                "😔 This user has hidden themselves from search results\\.",
                 parse_mode=ParseMode.MARKDOWN_V2,
             )
             return
@@ -268,8 +268,8 @@ async def _do_direct_lookup(update: Update, query: str, searcher_id: int):
         return
 
     await update.message.reply_text(
-        f"😔 لا يوجد نتائج لـ `{escape(query)}` في قاعدة البيانات\\.\n\n"
-        "_جرب البحث بالاسم عبر زر 🔍 Search_",
+        f"😔 No results for `{escape(query)}` in the database\\.\n\n"
+        "_Try a different spelling or search by @username_",
         parse_mode=ParseMode.MARKDOWN_V2,
     )
 

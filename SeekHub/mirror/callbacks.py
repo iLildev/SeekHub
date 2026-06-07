@@ -296,7 +296,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ],
         ])
         await query.message.reply_text(
-            f"🔔 *تتبع {name}*\n\nاختر ما تريد متابعته:",
+            f"🔔 *Track {name}*\n\nChoose what to track:",
             parse_mode=ParseMode.MARKDOWN_V2,
             reply_markup=kb,
         )
@@ -313,10 +313,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         max_tracking = (sh_user or {}).get("max_tracking", 0)
         if max_tracking == 0:
             kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("👑 ترقية الخطة", callback_data="show_plan"),
+                InlineKeyboardButton("👑 Upgrade Plan", callback_data="show_plan"),
             ]])
             await query.message.reply_text(
-                "❌ التتبع يتطلب خطة *Pro* أو أعلى\\.",
+                "❌ Tracking requires a *Pro* plan or higher\\.",
                 parse_mode=ParseMode.MARKDOWN_V2,
                 reply_markup=kb,
             )
@@ -342,10 +342,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 current = (cur.fetchone() or {}).get("cnt", 0)
                 if current >= max_tracking:
                     kb = InlineKeyboardMarkup([[
-                        InlineKeyboardButton("👑 ترقية الخطة", callback_data="show_plan"),
+                        InlineKeyboardButton("👑 Upgrade Plan", callback_data="show_plan"),
                     ]])
                     await query.message.reply_text(
-                        f"❌ وصلت للحد الأقصى \\(`{max_tracking}`\\)\\.\nرقّي خطتك أو أوقف تتبعاً آخر\\.",
+                        f"❌ Tracking limit reached \\(`{max_tracking}`\\)\\.\nUpgrade your plan or untrack someone first\\.",
                         parse_mode=ParseMode.MARKDOWN_V2,
                         reply_markup=kb,
                     )
@@ -364,7 +364,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         name = escape(user.get("first_name") or str(uid) if user else str(uid))
         types_str = escape(", ".join(t.replace("user_", "") for t in added) or "already tracked")
         await query.message.reply_text(
-            f"✅ تتبع *{name}* — `{types_str}`\nستُبلَّغ بأي تغيير\\.",
+            f"✅ Now tracking *{name}* — `{types_str}`\nYou'll be notified of any changes\\.",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
 
@@ -609,26 +609,24 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from db import sh_referrals, sh_crystals as sh_cr
         ref_count = sh_referrals.count(user.id)
         balance   = sh_cr.get_balance(user.id)
-        system_uname = escape(
-            query.message.bot.username or ""
-        )
+        system_uname = escape(query.message.bot.username or "")
         link = f"https://t\\.me/{system_uname}?start=ref_{user.id}"
         await query.message.reply_text(
-            f"🔗 *رابط الإحالة الخاص بك*\n\n"
+            f"🔗 *Your Referral Link*\n\n"
             f"`{link}`\n\n"
-            f"👥 المدعوون: `{ref_count}`\n"
-            f"💠 الكريستالات: `{balance}`\n\n"
-            f"_كل مستخدم جديد ينضم عبر رابطك يمنحك `10` 💠_",
+            f"👥 Referrals: `{ref_count}`\n"
+            f"💠 Crystals: `{balance}`\n\n"
+            f"_Every new user who joins via your link earns you `10` 💠_",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
 
     # ── show_submit ─ open group submission inline ────────────────────────────
     elif data == "show_submit":
         await query.message.reply_text(
-            "📢 *أضف مجموعة لـ SeekHub*\n\n"
-            "استخدم: `/submit @groupusername`\n\n"
-            "• \\+8💠 لكل مجموعة مقبولة\n"
-            "• يجب أن تكون أدمن أو عضو في المجموعة",
+            "📢 *Submit a Group to SeekHub*\n\n"
+            "Command: `/submit @groupusername`\n\n"
+            "• \\+8💠 per approved group\n"
+            "• You must be a member or admin of the group",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
 
@@ -641,17 +639,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         max_trk   = (sh_user or {}).get("max_tracking", 0)
         can_exp   = "✅" if (sh_user or {}).get("can_export") else "❌"
         lines = [
-            f"👑 *خطتك الحالية: {plan_name}*\n",
-            f"• 🔍 Queries يومية: `{daily_q}`",
-            f"• 🔔 تتبع مستخدمين: `{max_trk}`",
+            f"👑 *Your Plan: {plan_name}*\n",
+            f"• 🔍 Daily queries: `{daily_q}`",
+            f"• 🔔 Tracking slots: `{max_trk}`",
             f"• 📤 Export: {can_exp}",
             "",
-            "*الخطط المتاحة:*",
+            "*Available Plans:*",
             "• Free — 5 queries/day",
             "• Pro  — 50 queries/day \\+ tracking",
             "• Elite — unlimited \\+ export",
             "",
-            "_للترقية تواصل مع مدير النظام\\._",
+            "_Contact the system admin to upgrade\\._",
         ]
         await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN_V2)
 
