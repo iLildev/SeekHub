@@ -11,7 +11,7 @@ def main_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("🌟 Aura",    callback_data="menu_aura"),
         ],
         [
-            InlineKeyboardButton("📖 Manual",  url="https://t.me/SeekHubManual"),
+            InlineKeyboardButton("📖 Manual",  callback_data="manual:home"),
         ],
     ])
 

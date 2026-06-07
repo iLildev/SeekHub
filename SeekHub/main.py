@@ -34,6 +34,7 @@ from system.hide           import (
     handle_pre_checkout, handle_successful_payment,
 )
 from system.submit         import cmd_submit
+from system.manual         import cmd_manual, handle_manual_callback
 
 from runner import MirrorRunner
 
@@ -137,11 +138,13 @@ def build_system_app(token: str) -> Application:
     app.add_handler(CommandHandler("ban",      cmd_ban))
     app.add_handler(CommandHandler("unban",    cmd_unban))
     app.add_handler(CommandHandler("submit",   cmd_submit))
+    app.add_handler(CommandHandler("manual",   cmd_manual))
 
     app.add_handler(CallbackQueryHandler(handle_captcha_callback,    pattern=r"^captcha_"))
     app.add_handler(CallbackQueryHandler(handle_check_join_callback, pattern=r"^check_join$"))
     app.add_handler(CallbackQueryHandler(handle_menu_callback,       pattern=r"^menu_"))
     app.add_handler(CallbackQueryHandler(handle_hide_buy_callback,   pattern=r"^hide_buy:"))
+    app.add_handler(CallbackQueryHandler(handle_manual_callback,     pattern=r"^manual:"))
     app.add_handler(CallbackQueryHandler(handle_mset_callback,       pattern=r"^mset:"))
 
     app.add_handler(PreCheckoutQueryHandler(handle_pre_checkout))
