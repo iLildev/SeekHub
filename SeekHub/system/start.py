@@ -4,12 +4,11 @@ from telegram.constants import ParseMode
 
 from services.onboarding import handle_new_user
 from services.statistics import get_stats_fmt
-from keyboards.system.main import main_keyboard
 
 WELCOME_TEXT = (
     "Welcome to tɦe deepest connected system Telegram database\\!\n\n"
     "I can help you create and manage mirrors\\. "
-    "If you're new to tɦe mirrors, please read the manual\\.\n\n"
+    "If you're new to tɦe mirrors, please _[read the manual](https://t.me/SeekHubBot)_\\.\n\n"
     "*Mirrors*\n"
     "/mirror \\- create or manage your mirror\n"
     "/token \\- change your Mirror Bot\n\n"
@@ -19,7 +18,7 @@ WELCOME_TEXT = (
     "*Aura*\n"
     "/aura \\- get heard on user\n"
     "/addaura \\- put heard on user\n\n"
-    "We're now\n"
+    "*We're now*\n"
     "`{users}` users\n"
     "`{mirrors}` mirrors\n"
     "`{chats}` groups/chanηels\n\n"
@@ -49,8 +48,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         referrer_id=referrer_id,
     )
 
-    stats = get_stats_fmt()
-    text  = WELCOME_TEXT.format(
+    try:
+        stats = get_stats_fmt()
+    except Exception:
+        stats = {"users": "…", "mirrors": "…", "chats": "…"}
+
+    text = WELCOME_TEXT.format(
         users=stats["users"],
         mirrors=stats["mirrors"],
         chats=stats["chats"],
@@ -59,5 +62,4 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         text,
         parse_mode=ParseMode.MARKDOWN_V2,
-        reply_markup=main_keyboard(),
     )
