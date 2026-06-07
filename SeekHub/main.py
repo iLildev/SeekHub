@@ -3,9 +3,8 @@ main.py — SeekHub entry point
 ==============================
 Starts concurrently:
   1. System bot  (@SeekHubBot)    — management only
-  2. All mirror bots              — search interface (auto-loaded from DB)
-  3. Collector bot (optional)     — passive Bot API indexer
-  4. Userbot / MTProto (optional) — active indexer, scraper, online tracker
+  2. Collector bot (optional)     — passive Bot API indexer
+  3. Userbot / MTProto (optional) — active indexer, scraper, online tracker
 """
 import asyncio
 import logging
@@ -18,24 +17,21 @@ from telegram.ext import (
 )
 
 from db import init_db
-from db.sh_mirrors import get_all_active
-from runner import MirrorRunner
 
 from system.start          import cmd_start, WELCOME_TEXT
-from system.mirrors        import cmd_mirror, cmd_mystats
 from system.points         import cmd_points
 from system.aura           import cmd_aura, cmd_addaura
 from system.plan           import cmd_plan, handle_plan_buy_callback
 from system.admins         import cmd_stats, cmd_ban, cmd_unban
 from system.token_handler  import cmd_token
+from system.mirrors        import cmd_mirror, cmd_mystats
+from system.mirror_settings import cmd_mset, handle_mset_callback
 from system.captcha        import handle_captcha_callback
 from system.force_join     import handle_check_join_callback
 from system.hide           import (
     cmd_hide, handle_hide_buy_callback,
     handle_pre_checkout, handle_successful_payment,
 )
-from system.submit         import cmd_submit
-from system.mirror_settings import cmd_mset, handle_mset_callback
 
 from services.statistics import get_stats_fmt
 from keyboards.system.main import main_keyboard, back_keyboard
@@ -68,21 +64,6 @@ async def handle_menu_callback(update, context):
             reply_markup=main_keyboard(),
         )
 
-    elif data == "menu_mirror":
-        from db.sh_mirrors import get_by_owner
-        mirrors = get_by_owner(uid)
-        if mirrors:
-            lines = ["*🔮 Your Mirrors*\n"]
-            for m in mirrors:
-                lines.append(
-                    f"🤖 @{escape(m['bot_username'] or 'unknown')}\n"
-                    f"   Queries: `{m['query_count']}` \\| Users: `{m['user_count']}`"
-                )
-            text = "\n".join(lines)
-        else:
-            text = "*No Mirror Found*\n\nUse /token \\<your\\_bot\\_token\\> to register\\."
-        await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=back_keyboard())
-
     elif data == "menu_points":
         from db.sh_crystals import get_balance
         from db.sh_referrals import count as ref_count
@@ -93,8 +74,7 @@ async def handle_menu_callback(update, context):
             f"Referral link:\n`https://t\\.me/SeekHubBot?start={uid}`\n\n"
             f"*Earn crystals:*\n"
             f"• Share your referral link — *\\+10 crystals* per new user\n"
-            f"• New users get *\\+4 crystals* on join\n"
-            f"• Submit a new group via /submit — *\\+8 crystals*"
+            f"• New users get *\\+4 crystals* on join"
         )
         await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=back_keyboard())
 
@@ -120,8 +100,7 @@ async def handle_menu_callback(update, context):
             price = "Free" if p["price_crystals"] == 0 else f"`{p['price_crystals']}` crystals"
             lines.append(
                 f"{badge} *{escape(p['name'])}* — {price}\n"
-                f"  `{p['daily_queries']}` queries/day \\| `{p['max_mirrors']}` mirrors \\| "
-                f"`{p['max_tracking']}` tracks"
+                f"  `{p['daily_queries']}` queries/day \\| `{p['max_tracking']}` tracks"
             )
         await query.edit_message_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=back_keyboard())
 
@@ -144,21 +123,12 @@ async def handle_menu_callback(update, context):
         lines.append("\nUse /hide to purchase a plan\\.")
         await query.edit_message_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=back_keyboard())
 
-    elif data == "menu_submit":
-        text = (
-            "*📢 Submit a Group*\n\n"
-            "Help grow the SeekHub database and earn *8 crystals* "
-            "for every new public group or channel you submit\\.\n\n"
-            "Use /submit to get started\\."
-        )
-        await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=back_keyboard())
 
 
 # ── System bot builder ────────────────────────────────────────────────────────
 
-def build_system_app(token: str, runner: MirrorRunner) -> Application:
+def build_system_app(token: str) -> Application:
     app = Application.builder().token(token).build()
-    app.bot_data["mirror_runner"] = runner
 
     app.add_handler(CommandHandler("start",    cmd_start))
     app.add_handler(CommandHandler("mirror",   cmd_mirror))
@@ -173,7 +143,6 @@ def build_system_app(token: str, runner: MirrorRunner) -> Application:
     app.add_handler(CommandHandler("ban",      cmd_ban))
     app.add_handler(CommandHandler("unban",    cmd_unban))
     app.add_handler(CommandHandler("hide",     cmd_hide))
-    app.add_handler(CommandHandler("submit",   cmd_submit))
 
     app.add_handler(CallbackQueryHandler(handle_captcha_callback,    pattern=r"^captcha_"))
     app.add_handler(CallbackQueryHandler(handle_check_join_callback, pattern=r"^check_join$"))
@@ -241,11 +210,7 @@ async def main():
     init_db()
     logger.info("Database ready")
 
-    runner     = MirrorRunner()
-    active_mirrors = get_all_active()
-    logger.info("Found %d active mirror(s)", len(active_mirrors))
-
-    system_app = build_system_app(bot_token, runner)
+    system_app = build_system_app(bot_token)
     register_scheduled_tasks(system_app)
 
     await system_app.initialize()
@@ -272,15 +237,8 @@ async def main():
 
     userbot_client = await start_userbot(system_app)
 
-    await runner.start_all(active_mirrors, userbot_client=userbot_client)
-
-    if userbot_client:
-        runner.attach_userbot(userbot_client)
-
     logger.info(
-        "SeekHub fully operational — system bot ✅ | "
-        "%d mirror(s) ✅ | collector %s | userbot %s",
-        len(active_mirrors),
+        "SeekHub fully operational — system bot ✅ | collector %s | userbot %s",
         "✅" if collector_app else "⚠️ (set COLLECTOR_BOT_TOKEN)",
         "✅" if userbot_client else "⚠️ (run gen_session.py)",
     )
@@ -293,7 +251,6 @@ async def main():
     finally:
         if userbot_client:
             await userbot_client.stop()
-        await runner.stop_all()
         if collector_app:
             await collector_app.updater.stop()
             await collector_app.stop()
