@@ -4,11 +4,12 @@ from telegram.constants import ParseMode
 
 from services.onboarding import handle_new_user
 from services.statistics import get_stats_fmt
+from keyboards.system.main import main_keyboard
 
 WELCOME_TEXT = (
     "Welcome to tɦe deepest connected system Telegram database\\!\n\n"
     "I can help you create and manage mirrors\\. "
-    "If you're new to tɦe mirrors, please _[read the manual](https://t.me/SeekHubBot)_\\.\n\n"
+    "If you're new to tɦe mirrors, please _read the manual_\\.\n\n"
     "*Mirrors*\n"
     "/mirror \\- create or manage your mirror\n"
     "/token \\- change your Mirror Bot\n\n"
@@ -62,4 +63,5 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         text,
         parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=main_keyboard(),
     )
