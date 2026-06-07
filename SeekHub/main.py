@@ -22,7 +22,7 @@ from db import init_db
 from system.start          import cmd_start, WELCOME_TEXT
 from system.points         import cmd_points
 from system.aura           import cmd_aura, cmd_addaura
-from system.plan           import cmd_plan, handle_plan_buy_callback
+from system.plan           import cmd_plan
 from system.admins         import cmd_stats, cmd_ban, cmd_unban
 from system.token_handler  import cmd_token
 from system.mirrors        import cmd_mirror, cmd_mystats
@@ -30,7 +30,7 @@ from system.mirror_settings import cmd_mset, handle_mset_callback
 from system.captcha        import handle_captcha_callback
 from system.force_join     import handle_check_join_callback
 from system.hide           import (
-    cmd_hide, handle_hide_buy_callback,
+    handle_hide_buy_callback,
     handle_pre_checkout, handle_successful_payment,
 )
 from system.submit         import cmd_submit
@@ -93,39 +93,29 @@ async def handle_menu_callback(update, context):
         await query.edit_message_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=back_keyboard())
 
     elif data == "menu_plan":
-        from db.connection import get_conn
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT * FROM sh_plans ORDER BY id")
-                plans = cur.fetchall()
-        lines = ["*👑 Plans*\n"]
-        for p in plans:
-            badge = (p["features"] or {}).get("badge", "•")
-            price = "Free" if p["price_crystals"] == 0 else f"`{p['price_crystals']}` crystals"
-            lines.append(
-                f"{badge} *{escape(p['name'])}* — {price}\n"
-                f"  `{p['daily_queries']}` queries/day \\| `{p['max_tracking']}` tracks"
-            )
-        await query.edit_message_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=back_keyboard())
-
-    elif data == "menu_hide":
         from db import sh_hide_plans
+        from system.plan import PLAN_DESCRIPTIONS
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         active = sh_hide_plans.get_active_subscription(uid)
-        plans  = sh_hide_plans.get_all()
-        lines  = ["*🛡️ Privacy Plans*\n",
-                  "Hide yourself from SeekHub search results\\. Paid monthly via Telegram Stars\\.\n"]
-        badges = {"ghost": "👻", "shadow": "🌑", "spy": "🕵️"}
-        for p in plans:
-            feat  = p["features"] or {}
-            badge = feat.get("badge", "•")
-            price = feat.get("price_display", f"⭐{p['price_stars']}")
-            lines.append(f"{badge} *{escape(p['name'])}* — {escape(price)}")
+        lines  = ["🛡️ *Privacy Plans*\n",
+                  "Choose a plan to hide your presence from SeekHub's search results\\. "
+                  "All plans are paid monthly via Telegram Stars\\.\n"]
+        for desc in PLAN_DESCRIPTIONS.values():
+            lines.append(desc + "\n")
         if active:
             exp   = active["expires_at"].strftime("%Y\\-%m\\-%d")
             pname = escape(active.get("plan_name", ""))
-            lines.append(f"\n✅ Active: *{pname}* \\(expires {exp}\\)")
-        lines.append("\nUse /hide to purchase a plan\\.")
-        await query.edit_message_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=back_keyboard())
+            lines.append(f"✅ *Active plan:* {pname} \\(expires {exp}\\)")
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("👻 Ghost — ⭐250",  callback_data="hide_buy:ghost"),
+                InlineKeyboardButton("🌑 Shadow — ⭐400", callback_data="hide_buy:shadow"),
+            ],
+            [
+                InlineKeyboardButton("🕵️ Spy — ⭐750",   callback_data="hide_buy:spy"),
+            ],
+        ])
+        await query.edit_message_text("\n".join(lines), parse_mode="MarkdownV2", reply_markup=keyboard)
 
 
 
@@ -146,14 +136,12 @@ def build_system_app(token: str) -> Application:
     app.add_handler(CommandHandler("stats",    cmd_stats))
     app.add_handler(CommandHandler("ban",      cmd_ban))
     app.add_handler(CommandHandler("unban",    cmd_unban))
-    app.add_handler(CommandHandler("hide",     cmd_hide))
     app.add_handler(CommandHandler("submit",   cmd_submit))
 
     app.add_handler(CallbackQueryHandler(handle_captcha_callback,    pattern=r"^captcha_"))
     app.add_handler(CallbackQueryHandler(handle_check_join_callback, pattern=r"^check_join$"))
     app.add_handler(CallbackQueryHandler(handle_menu_callback,       pattern=r"^menu_"))
     app.add_handler(CallbackQueryHandler(handle_hide_buy_callback,   pattern=r"^hide_buy:"))
-    app.add_handler(CallbackQueryHandler(handle_plan_buy_callback,   pattern=r"^plan_buy:"))
     app.add_handler(CallbackQueryHandler(handle_mset_callback,       pattern=r"^mset:"))
 
     app.add_handler(PreCheckoutQueryHandler(handle_pre_checkout))
