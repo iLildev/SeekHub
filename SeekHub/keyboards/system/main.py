@@ -12,7 +12,7 @@ def main_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("🛡️ Privacy", callback_data="menu_hide"),
         ],
         [
-            InlineKeyboardButton("📖 Manual",  url="https://t.me/SeekHubBot"),
+            InlineKeyboardButton("📖 Manual",  url="https://t.me/SeekHubManual"),
         ],
     ])
 

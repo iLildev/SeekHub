@@ -1,10 +1,10 @@
-from db import tg_users, tg_chats, tg_messages, sh_mirrors
+from db import sh_users, tg_chats, tg_messages, sh_mirrors
 from utils.fmt import fmt_count
 
 
 def get_stats() -> dict:
     return {
-        "users":    tg_users.count(),
+        "users":    sh_users.count(),
         "mirrors":  sh_mirrors.count(),
         "chats":    tg_chats.count(),
         "messages": tg_messages.count(),
